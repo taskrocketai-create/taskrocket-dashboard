@@ -128,3 +128,7 @@
 .help a {
   color: var(--accent-light);
 }
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
