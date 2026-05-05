@@ -2,7 +2,7 @@ import { supabase, Client } from "@/lib/supabase";
 import Link from "next/link";
 import styles from "./page.module.css";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const { data: clients } = await supabase
