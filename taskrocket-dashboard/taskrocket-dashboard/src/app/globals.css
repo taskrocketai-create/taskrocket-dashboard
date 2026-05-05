@@ -46,4 +46,4 @@ a { color: inherit; text-decoration: none; }
 button { font-family: var(--font); cursor: pointer; border: none; outline: none; }
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { bac
+::-webkit-scrollbar-thumb { background: var(--border-dark); border-radius: 3px; }
