@@ -67,13 +67,26 @@ export default function LoginForm() {
 
           {error && <p className={styles.error}>{error}</p>}
 
-          <button
-            className={styles.btn}
-            type="submit"
-            disabled={loading || !password}
-          >
-            {loading ? "Please wait…" : "Sign in →"}
-          </button>
+     <button
+  className={styles.btn}
+  type="submit"
+  disabled={loading || !password}
+>
+  {loading ? (
+    <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+      <span style={{
+        width: "14px",
+        height: "14px",
+        border: "2px solid rgba(255,255,255,0.3)",
+        borderTop: "2px solid white",
+        borderRadius: "50%",
+        display: "inline-block",
+        animation: "spin 0.7s linear infinite"
+      }} />
+      Please wait…
+    </span>
+  ) : "Sign in →"}
+</button>
         </form>
 
         <p className={styles.help}>
