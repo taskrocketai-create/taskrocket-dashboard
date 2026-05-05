@@ -32,12 +32,7 @@ function formatDate(str: string) {
   const d = new Date(str);
   return isNaN(d.getTime())
     ? str
-    : d.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
+    : d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 export default function DashboardClient({ client, initialSubmissions }: Props) {
@@ -60,8 +55,7 @@ export default function DashboardClient({ client, initialSubmissions }: Props) {
   }, [client.sheet_id]);
 
   const filtered = submissions.filter((s) => {
-    const matchesFilter =
-      filter === "all" || (s.status ?? "new").toLowerCase() === filter;
+    const matchesFilter = filter === "all" || (s.status ?? "new").toLowerCase() === filter;
     const term = search.toLowerCase();
     const matchesSearch =
       !term ||
@@ -84,12 +78,10 @@ export default function DashboardClient({ client, initialSubmissions }: Props) {
         <div className={styles.sidebarTop}>
           <div className={styles.logo}>
             <span>🚀</span>
-            <span className={styles.brand}>TaskRocket</span>
+            <span>Task<span className={styles.logoAccent}>Rocket</span></span>
           </div>
           <div className={styles.clientInfo}>
-            <div className={styles.clientAvatar}>
-              {client.business_name.charAt(0)}
-            </div>
+            <div className={styles.clientAvatar}>{client.business_name.charAt(0)}</div>
             <div>
               <div className={styles.clientName}>{client.business_name}</div>
               <div className={styles.clientSlug}>/{client.slug}</div>
@@ -115,11 +107,9 @@ export default function DashboardClient({ client, initialSubmissions }: Props) {
         </nav>
 
         <div className={styles.sidebarBottom}>
-          <div className={styles.infoRow}>
-            <span className={styles.infoLabel}>Twilio</span>
-            <span className={styles.infoValue}>
-              {client.twilio_number ? formatPhone(client.twilio_number) : "—"}
-            </span>
+          <div className={styles.infoLabel}>Twilio Number</div>
+          <div className={styles.infoValue}>
+            {client.twilio_number ? formatPhone(client.twilio_number) : "—"}
           </div>
         </div>
       </aside>
@@ -152,63 +142,56 @@ export default function DashboardClient({ client, initialSubmissions }: Props) {
 
         {filtered.length === 0 ? (
           <div className={styles.empty}>
-            <p>No submissions yet.</p>
+            <p>No leads yet.</p>
             <p className={styles.emptyHint}>Missed calls will appear here automatically.</p>
           </div>
         ) : (
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Name</th>
-                  <th>Phone</th>
-                  <th>Vehicle</th>
-                  <th>Problem</th>
-                  <th>Best Time</th>
-                  <th>Price Range</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((row, i) => {
-                  const status = (row.status ?? "new").toLowerCase();
-                  const colorKey = STATUS_COLORS[status] ?? "yellow";
-                  const isDone = status === "done";
-                  return (
-                    <tr key={row.id ?? i} className={isDone ? styles.rowDone : ""}>
-                      <td className={styles.dimCell}>{formatDate(String(row.call_time ?? ""))}</td>
-                      <td className={styles.callerCell}>
-                        {row.caller_name || <span className={styles.unknown}>Unknown</span>}
-                      </td>
-                      <td className={styles.mono}>
-                        {row.caller_number ? formatPhone(String(row.caller_number)) : "—"}
-                      </td>
-                      <td className={styles.dimCell}>{String(row.vehicle || "—")}</td>
-                      <td className={styles.notes}>{String(row.problem || "—")}</td>
-                      <td className={styles.dimCell}>{String(row.best_time || "—")}</td>
-                      <td className={styles.dimCell}>{String(row.price_range || "—")}</td>
-                      <td>
-                        <span className={`${styles.pill} ${styles[`pill_${colorKey}`]}`}>
-                          {status}
-                        </span>
-                      </td>
-                      <td>
-                        {!!row.conversation && (
-                          <button
-                            className={styles.viewBtn}
-                            onClick={() => setModalRow(row)}
-                          >
-                            View
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className={styles.cardsWrap}>
+            {filtered.map((row, i) => {
+              const status = (row.status ?? "new").toLowerCase();
+              const colorKey = STATUS_COLORS[status] ?? "yellow";
+              const isDone = status === "done";
+              return (
+                <div
+                  key={row.id ?? i}
+                  className={`${styles.leadCard} ${isDone ? styles.leadCardDone : ""}`}
+                >
+                  <div className={styles.leadMain}>
+                    <div className={styles.leadName}>
+                      {row.caller_name || "Unknown Caller"}
+                    </div>
+                    <div className={styles.leadPhone}>
+                      {row.caller_number ? formatPhone(String(row.caller_number)) : "—"}
+                      {row.call_time ? ` · ${formatDate(String(row.call_time))}` : ""}
+                    </div>
+                  </div>
+
+                  <div className={styles.leadVehicle}>
+                    <div className={styles.leadVehicleLabel}>Vehicle</div>
+                    <div className={styles.leadVehicleValue}>{String(row.vehicle || "—")}</div>
+                  </div>
+
+                  <div className={styles.leadProblem}>
+                    <div className={styles.leadProblemLabel}>Problem</div>
+                    <div className={styles.leadProblemValue}>{String(row.problem || "—")}</div>
+                  </div>
+
+                  <div className={styles.leadActions}>
+                    <span className={`${styles.pill} ${styles[`pill_${colorKey}`]}`}>
+                      {status}
+                    </span>
+                    {!!row.conversation && (
+                      <button
+                        className={styles.viewBtn}
+                        onClick={() => setModalRow(row)}
+                      >
+                        View Convo
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </main>
@@ -222,7 +205,8 @@ export default function DashboardClient({ client, initialSubmissions }: Props) {
                   {modalRow.caller_name || "Unknown Caller"}
                 </h2>
                 <p className={styles.modalSub}>
-                  {modalRow.caller_number ? formatPhone(String(modalRow.caller_number)) : ""} · {formatDate(String(modalRow.call_time ?? ""))}
+                  {modalRow.caller_number ? formatPhone(String(modalRow.caller_number)) : ""}
+                  {modalRow.call_time ? ` · ${formatDate(String(modalRow.call_time))}` : ""}
                 </p>
               </div>
               <button className={styles.modalClose} onClick={() => setModalRow(null)}>✕</button>
