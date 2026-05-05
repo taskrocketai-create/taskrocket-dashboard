@@ -44,64 +44,42 @@ export default function DashboardClient({ client, initialSubmissions }: Props) {
   const [submissions, setSubmissions] = useState<Submission[]>(initialSubmissions);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<string>("all");
-  const [marking, setMarking] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [modalRow, setModalRow] = useState<Submission | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!client.script_url) return;
+    if (!client.sheet_id) return;
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/submissions?scriptUrl=${encodeURIComponent(client.script_url)}`
-      );
+      const res = await fetch(`/api/sheets?sheetId=${client.sheet_id}`);
       const data = await res.json();
-      setSubmissions(Array.isArray(data) ? data : data.data ?? []);
+      setSubmissions(Array.isArray(data) ? data : []);
     } finally {
       setLoading(false);
     }
-  }, [client.script_url]);
-
-  const markDone = useCallback(
-    async (row: Submission) => {
-      if (!client.script_url || !row.id) return;
-      setMarking(String(row.id));
-      try {
-        await fetch(client.script_url, {
-          method: "POST",
-          body: JSON.stringify({ action: "markDone", id: row.id }),
-        });
-        setSubmissions((prev) =>
-          prev.map((s) =>
-            s.id === row.id ? { ...s, status: "done" } : s
-          )
-        );
-      } finally {
-        setMarking(null);
-      }
-    },
-    [client.script_url]
-  );
+  }, [client.sheet_id]);
 
   const filtered = submissions.filter((s) => {
-    const matchesFilter = filter === "all" || (s.status ?? "new").toLowerCase() === filter;
+    const matchesFilter =
+      filter === "all" || (s.status ?? "new").toLowerCase() === filter;
     const term = search.toLowerCase();
     const matchesSearch =
       !term ||
       String(s.caller_name ?? "").toLowerCase().includes(term) ||
       String(s.caller_number ?? "").toLowerCase().includes(term) ||
-      String(s.notes ?? "").toLowerCase().includes(term);
+      String(s.problem ?? "").toLowerCase().includes(term) ||
+      String(s.vehicle ?? "").toLowerCase().includes(term);
     return matchesFilter && matchesSearch;
   });
 
   const counts = {
     all: submissions.length,
-    new: submissions.filter((s) => !s.status || s.status === "new").length,
-    done: submissions.filter((s) => s.status === "done").length,
+    new: submissions.filter((s) => !s.status || s.status.toLowerCase() === "new").length,
+    done: submissions.filter((s) => s.status?.toLowerCase() === "done").length,
   };
 
   return (
     <div className={styles.layout}>
-      {/* Sidebar */}
       <aside className={styles.sidebar}>
         <div className={styles.sidebarTop}>
           <div className={styles.logo}>
@@ -140,29 +118,24 @@ export default function DashboardClient({ client, initialSubmissions }: Props) {
           <div className={styles.infoRow}>
             <span className={styles.infoLabel}>Twilio</span>
             <span className={styles.infoValue}>
-              {client.twilio_number
-                ? formatPhone(client.twilio_number)
-                : "—"}
+              {client.twilio_number ? formatPhone(client.twilio_number) : "—"}
             </span>
           </div>
         </div>
       </aside>
 
-      {/* Main */}
       <main className={styles.main}>
         <div className={styles.topbar}>
           <div className={styles.topbarLeft}>
             <h1 className={styles.pageTitle}>
-              {filter === "all"
-                ? "All Leads"
-                : filter.charAt(0).toUpperCase() + filter.slice(1)}
+              {filter === "all" ? "All Leads" : filter.charAt(0).toUpperCase() + filter.slice(1)}
             </h1>
             <span className={styles.count}>{filtered.length} records</span>
           </div>
           <div className={styles.topbarRight}>
             <input
               className={styles.search}
-              placeholder="Search name, phone…"
+              placeholder="Search name, vehicle, problem…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -180,21 +153,21 @@ export default function DashboardClient({ client, initialSubmissions }: Props) {
         {filtered.length === 0 ? (
           <div className={styles.empty}>
             <p>No submissions yet.</p>
-            <p className={styles.emptyHint}>
-              Missed calls will appear here automatically.
-            </p>
+            <p className={styles.emptyHint}>Missed calls will appear here automatically.</p>
           </div>
         ) : (
           <div className={styles.tableWrap}>
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>Caller</th>
+                  <th>Date</th>
+                  <th>Name</th>
                   <th>Phone</th>
-                  <th>Called At</th>
+                  <th>Vehicle</th>
+                  <th>Problem</th>
                   <th>Best Time</th>
+                  <th>Price Range</th>
                   <th>Status</th>
-                  <th>Notes</th>
                   <th></th>
                 </tr>
               </thead>
@@ -205,36 +178,29 @@ export default function DashboardClient({ client, initialSubmissions }: Props) {
                   const isDone = status === "done";
                   return (
                     <tr key={row.id ?? i} className={isDone ? styles.rowDone : ""}>
+                      <td className={styles.dimCell}>{formatDate(String(row.call_time ?? ""))}</td>
                       <td className={styles.callerCell}>
-                        {row.caller_name || (
-                          <span className={styles.unknown}>Unknown</span>
-                        )}
+                        {row.caller_name || <span className={styles.unknown}>Unknown</span>}
                       </td>
                       <td className={styles.mono}>
-                        {row.caller_number
-                          ? formatPhone(String(row.caller_number))
-                          : "—"}
+                        {row.caller_number ? formatPhone(String(row.caller_number)) : "—"}
                       </td>
-                      <td className={styles.dimCell}>
-                        {formatDate(String(row.call_time ?? row.created_at ?? ""))}
-                      </td>
-                      <td className={styles.dimCell}>
-                        {row.best_time || "—"}
-                      </td>
+                      <td className={styles.dimCell}>{String(row.vehicle || "—")}</td>
+                      <td className={styles.notes}>{String(row.problem || "—")}</td>
+                      <td className={styles.dimCell}>{String(row.best_time || "—")}</td>
+                      <td className={styles.dimCell}>{String(row.price_range || "—")}</td>
                       <td>
                         <span className={`${styles.pill} ${styles[`pill_${colorKey}`]}`}>
                           {status}
                         </span>
                       </td>
-                      <td className={styles.notes}>{row.notes || "—"}</td>
                       <td>
-                        {!isDone && (
+                        {!!row.conversation && (
                           <button
-                            className={styles.doneBtn}
-                            onClick={() => markDone(row)}
-                            disabled={marking === String(row.id)}
+                            className={styles.viewBtn}
+                            onClick={() => setModalRow(row)}
                           >
-                            {marking === String(row.id) ? "…" : "✓ Done"}
+                            View
                           </button>
                         )}
                       </td>
@@ -246,6 +212,27 @@ export default function DashboardClient({ client, initialSubmissions }: Props) {
           </div>
         )}
       </main>
+
+      {modalRow && (
+        <div className={styles.modalOverlay} onClick={() => setModalRow(null)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <div>
+                <h2 className={styles.modalTitle}>
+                  {modalRow.caller_name || "Unknown Caller"}
+                </h2>
+                <p className={styles.modalSub}>
+                  {modalRow.caller_number ? formatPhone(String(modalRow.caller_number)) : ""} · {formatDate(String(modalRow.call_time ?? ""))}
+                </p>
+              </div>
+              <button className={styles.modalClose} onClick={() => setModalRow(null)}>✕</button>
+            </div>
+            <div className={styles.modalBody}>
+              <pre className={styles.conversation}>{String(modalRow.conversation ?? "")}</pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
