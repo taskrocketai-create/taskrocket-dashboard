@@ -25,7 +25,8 @@ function formatPhone(num: string) {
 
 function formatDate(str: string) {
   if (!str) return "";
-  const d = new Date(str);
+  const num = Number(str);
+  const d = !isNaN(num) && num > 1000000000 ? new Date(num * 1000) : new Date(str);
   return isNaN(d.getTime()) ? str : d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
