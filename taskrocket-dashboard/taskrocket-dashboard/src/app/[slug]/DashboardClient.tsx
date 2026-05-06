@@ -30,6 +30,31 @@ function formatDate(str: string) {
   return isNaN(d.getTime()) ? str : d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+async function subscribeToPush(slug: string) {
+  try {
+    if (!("Notification" in window) || !("serviceWorker" in navigator)) return;
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") return;
+
+    const reg = await navigator.serviceWorker.ready;
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) return;
+
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
+    });
+
+    await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug, subscription: sub }),
+    });
+  } catch (err) {
+    console.error("Push subscription failed:", err);
+  }
+}
+
 export default function DashboardClient({ client, initialSubmissions }: Props) {
   const [submissions, setSubmissions] = useState<Submission[]>(initialSubmissions);
   const [loading, setLoading] = useState(false);
@@ -57,6 +82,11 @@ export default function DashboardClient({ client, initialSubmissions }: Props) {
     }, 60000);
     return () => clearInterval(interval);
   }, [refresh]);
+
+  // Request push notification permission on load
+  useEffect(() => {
+    subscribeToPush(client.slug);
+  }, [client.slug]);
 
   const markDone = useCallback(async (row: Submission) => {
     setMarking(String(row.id));
