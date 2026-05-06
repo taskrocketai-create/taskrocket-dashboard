@@ -3,17 +3,23 @@ import { NextRequest, NextResponse } from "next/server";
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Only protect /<slug> routes (not /login, /api, /_next, etc.)
+  // Skip static files, API routes, Next.js internals
   if (
     pathname.startsWith("/login") ||
     pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
-    pathname === "/"
+    pathname.startsWith("/offline") ||
+    pathname === "/" ||
+    pathname === "/manifest.json" ||
+    pathname === "/sw.js" ||
+    pathname.endsWith(".png") ||
+    pathname.endsWith(".jpg") ||
+    pathname.endsWith(".ico") ||
+    pathname.endsWith(".svg")
   ) {
     return NextResponse.next();
   }
 
-  // Extract slug from path: /graysons-auto → graysons-auto
   const slug = pathname.split("/")[1];
   if (!slug) return NextResponse.next();
 
