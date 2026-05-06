@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Client, Submission } from "@/lib/supabase";
 import styles from "./dashboard.module.css";
 
@@ -49,6 +49,14 @@ export default function DashboardClient({ client, initialSubmissions }: Props) {
       setLoading(false);
     }
   }, [client.sheet_id]);
+
+  // Auto-refresh every 60 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refresh();
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [refresh]);
 
   const markDone = useCallback(async (row: Submission) => {
     setMarking(String(row.id));
