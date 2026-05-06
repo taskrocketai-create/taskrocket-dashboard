@@ -1,10 +1,11 @@
-import { supabase, Client } from "@/lib/supabase";
+import { getSupabaseClient, Client } from "@/lib/supabase";
 import Link from "next/link";
 import styles from "./page.module.css";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
+  const supabase = getSupabaseClient();
   const { data: clients } = await supabase
     .from("clients")
     .select("*")

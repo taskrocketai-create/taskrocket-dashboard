@@ -1,4 +1,4 @@
-import { supabase, Client } from "@/lib/supabase";
+import { getSupabaseClient, Client } from "@/lib/supabase";
 import { notFound } from "next/navigation";
 import DashboardClient from "./DashboardClient";
 
@@ -9,6 +9,7 @@ type Props = {
 };
 
 async function getClient(slug: string): Promise<Client | null> {
+  const supabase = getSupabaseClient();
   const { data } = await supabase
     .from("clients")
     .select("*")
