@@ -17,16 +17,20 @@ export async function POST(req: NextRequest) {
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  const { data: subs } = await supabase
+  const { data: subs, error } = await supabase
     .from("push_subscriptions")
     .select("*")
     .eq("slug", slug);
 
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
   if (!subs || subs.length === 0) {
-    return NextResponse.json({ ok: true, sent: 0 });
+    return NextResponse.json({ ok: true, sent: 0, message: "No subscribers" });
   }
 
   const payload = JSON.stringify({
