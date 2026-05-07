@@ -103,12 +103,22 @@ export default function DashboardClient({ client, initialSubmissions }: Props) {
   const markDone = useCallback(async (row: Submission) => {
     setMarking(String(row.id));
     try {
-      await new Promise(r => setTimeout(r, 400));
+      // Update the sheet
+      await fetch("/api/sheets/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sheetId: client.sheet_id,
+          rowIndex: row.id,
+          status: "Done",
+        }),
+      });
+      // Remove from UI
       setSubmissions(prev => prev.filter(s => s.id !== row.id));
     } finally {
       setMarking(null);
     }
-  }, []);
+  }, [client.sheet_id]);
 
   const counts = {
     all: submissions.length,
