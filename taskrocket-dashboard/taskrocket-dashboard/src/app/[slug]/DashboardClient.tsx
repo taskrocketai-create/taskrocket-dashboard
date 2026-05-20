@@ -104,7 +104,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
   function showToast(msg: string) {
     setToast(msg);
     clearTimeout(toastRef.current);
-    toastRef.current = setTimeout(() => setToast(null), 4000);
+   toastRef.current = setTimeout(() => setToast(null), 4000) as unknown as number;
   }
 
   async function enablePush() {
