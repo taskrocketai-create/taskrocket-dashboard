@@ -1,39 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
-
-  // Skip static files, API routes, Next.js internals
-  if (
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/api") ||
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/offline") ||
-    pathname === "/" ||
-    pathname === "/manifest.json" ||
-    pathname === "/sw.js" ||
-    pathname.endsWith(".png") ||
-    pathname.endsWith(".jpg") ||
-    pathname.endsWith(".ico") ||
-    pathname.endsWith(".svg")
-  ) {
-    return NextResponse.next();
-  }
-
-  const slug = pathname.split("/")[1];
-  if (!slug) return NextResponse.next();
-
-  const cookieKey = `tr_auth_${slug}`;
-  const cookie = req.cookies.get(cookieKey);
-
-  if (!cookie?.value) {
-    const loginUrl = req.nextUrl.clone();
-    loginUrl.pathname = "/login";
-    loginUrl.searchParams.set("slug", slug);
-    loginUrl.searchParams.set("next", pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-
   return NextResponse.next();
 }
 
