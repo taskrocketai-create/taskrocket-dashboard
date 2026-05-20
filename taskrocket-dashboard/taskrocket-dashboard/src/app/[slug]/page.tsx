@@ -1,6 +1,7 @@
-import { supabase, Client } from "@/lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 import { notFound } from "next/navigation";
 import DashboardClient from "./DashboardClient";
+import { AithaClient, AithaCall } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -8,50 +9,55 @@ type Props = {
   params: Promise<{ slug: string }>;
 };
 
-async function getClient(slug: string): Promise<Client | null> {
+async function getClientBySlug(slug: string): Promise<AithaClient | null> {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_KEY!
+  );
+
+  // Look up client by matching owner_email slug or aitha_phone slug
+  // Slug format: graysons-auto maps to business_name
   const { data } = await supabase
+    .schema("aitha")
     .from("clients")
     .select("*")
-    .eq("slug", slug)
+    .ilike("business_name", slug.replace(/-/g, " "))
     .single();
-  return data;
+
+  if (data) return data;
+
+  // Fallback: match by id
+  const { data: byId } = await supabase
+    .schema("aitha")
+    .from("clients")
+    .select("*")
+    .eq("id", slug)
+    .single();
+
+  return byId;
 }
 
-async function getSubmissions(sheetId: string) {
-  try {
-    const apiKey = process.env.GOOGLE_SHEETS_API_KEY;
-    const range = "Sheet1!A2:J1000";
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?key=${apiKey}`;
-    const res = await fetch(url, { next: { revalidate: 30 } });
-    if (!res.ok) return [];
-    const json = await res.json();
-    const rows = json.values ?? [];
-    return rows
-      .filter((row: string[]) => row.some((cell) => cell?.trim()))
-      .map((row: string[], i: number) => ({
-        id: String(i + 2),
-        call_time: row[0] ?? "",
-        status: row[1] ?? "new",
-        caller_number: row[2] ?? "",
-        caller_name: row[3] ?? "",
-        contact_preference: row[4] ?? "",
-        best_time: row[5] ?? "",
-        vehicle: row[6] ?? "",
-        problem: row[7] ?? "",
-        price_range: row[8] ?? "",
-        conversation: row[9] ?? "",
-      }));
-  } catch {
-    return [];
-  }
+async function getCalls(clientId: string): Promise<AithaCall[]> {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_KEY!
+  );
+
+  const { data } = await supabase
+    .schema("aitha")
+    .from("calls")
+    .select("*, messages(*)")
+    .eq("client_id", clientId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  return data || [];
 }
 
 export default async function ClientDashboardPage({ params }: Props) {
   const { slug } = await params;
-  const client = await getClient(slug);
+  const client = await getClientBySlug(slug);
   if (!client) notFound();
-  const submissions = client.sheet_id
-    ? await getSubmissions(client.sheet_id)
-    : [];
-  return <DashboardClient client={client} initialSubmissions={submissions} />;
+  const calls = await getCalls(client.id);
+  return <DashboardClient client={client} initialCalls={calls} />;
 }
