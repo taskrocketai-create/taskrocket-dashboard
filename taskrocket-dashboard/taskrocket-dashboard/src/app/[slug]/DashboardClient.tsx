@@ -1,274 +1,401 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { Client, Submission } from "@/lib/supabase";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { AithaClient, AithaCall, AithaMessage } from "@/lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 import styles from "./dashboard.module.css";
 
-type Props = {
-  client: Client;
-  initialSubmissions: Submission[];
+const STATUS: Record<string, { label: string; color: string; bg: string }> = {
+  missed:           { label: "Missed",      color: "#FF7A30", bg: "rgba(255,122,48,0.12)" },
+  ai_texted:        { label: "AI Texted",   color: "#2DD4BF", bg: "rgba(45,212,191,0.12)" },
+  customer_replied: { label: "Replied",     color: "#60A5FA", bg: "rgba(96,165,250,0.12)" },
+  owner_replied:    { label: "You Replied", color: "#A78BFA", bg: "rgba(167,139,250,0.12)" },
+  resolved:         { label: "Resolved",    color: "#6B7280", bg: "rgba(107,114,128,0.12)" },
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  new: "yellow",
-  contacted: "blue",
-  done: "green",
-  "no answer": "red",
+const URGENCY: Record<string, { label: string; color: string }> = {
+  immediate: { label: "🔴 Urgent",   color: "#EF4444" },
+  same_day:  { label: "🟠 Same Day", color: "#F97316" },
+  schedule:  { label: "🟡 Routine",  color: "#EAB308" },
+  info_only: { label: "⚪ Info",     color: "#6B7280" },
 };
 
-function formatPhone(num: string) {
-  const clean = num.replace(/\D/g, "");
-  if (clean.length === 11 && clean[0] === "1") return `(${clean.slice(1,4)}) ${clean.slice(4,7)}-${clean.slice(7)}`;
-  if (clean.length === 10) return `(${clean.slice(0,3)}) ${clean.slice(3,6)}-${clean.slice(6)}`;
-  return num;
-}
+const trunc = (s: string | null | undefined, n: number) =>
+  !s ? "—" : s.length > n ? s.slice(0, n) + "…" : s;
 
-function formatDate(str: string) {
-  if (!str) return "";
-  const num = Number(str);
-  const d = !isNaN(num) && num > 1000000000 ? new Date(num * 1000) : new Date(str);
-  return isNaN(d.getTime()) ? str : d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-}
-
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
-
-async function subscribeToPush(slug: string) {
+function playPing() {
   try {
-    if (!("Notification" in window) || !("serviceWorker" in navigator)) return;
-    const permission = await Notification.requestPermission();
-    if (permission !== "granted") return;
-
-    const reg = await navigator.serviceWorker.ready;
-    const existing = await reg.pushManager.getSubscription();
-    if (existing) await existing.unsubscribe();
-
-    const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-    if (!vapidKey) return;
-
-    const sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapidKey),
-    });
-
-    await fetch("/api/push/subscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slug, subscription: sub }),
-    });
-  } catch (err) {
-    console.error("Push subscription failed:", err);
-  }
+    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.setValueAtTime(880, ctx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.15);
+    g.gain.setValueAtTime(0.12, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+    o.start(); o.stop(ctx.currentTime + 0.4);
+  } catch (_) {}
 }
 
-export default function DashboardClient({ client, initialSubmissions }: Props) {
-  const [submissions, setSubmissions] = useState<Submission[]>(initialSubmissions);
-  const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState<string>("new");
-  const [search, setSearch] = useState("");
-  const [marking, setMarking] = useState<string | null>(null);
-  const [modalRow, setModalRow] = useState<Submission | null>(null);
+type Props = {
+  client: AithaClient;
+  initialCalls: AithaCall[];
+};
 
-  const refresh = useCallback(async () => {
-    if (!client.sheet_id) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/sheets?sheetId=${client.sheet_id}`);
-      const data = await res.json();
-      setSubmissions(Array.isArray(data) ? data : []);
-    } finally {
-      setLoading(false);
+export default function DashboardClient({ client, initialCalls }: Props) {
+  const [calls, setCalls]           = useState<AithaCall[]>(initialCalls);
+  const [selected, setSelected]     = useState<AithaCall | null>(null);
+  const [reply, setReply]           = useState("");
+  const [tab, setTab]               = useState("all");
+  const [sending, setSending]       = useState(false);
+  const [pushOn, setPushOn]         = useState(false);
+  const [showBanner, setShowBanner] = useState(false);
+  const [toast, setToast]           = useState<string | null>(null);
+  const toastRef                    = useRef<ReturnType<typeof setTimeout>>();
+  const threadRef                   = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if ("Notification" in window) {
+      setPushOn(Notification.permission === "granted");
+      if (Notification.permission === "default") setTimeout(() => setShowBanner(true), 3000);
     }
-  }, [client.sheet_id]);
+  }, []);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      refresh();
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [refresh]);
+    if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
+  }, [selected?.messages?.length]);
 
+  // Supabase Realtime
   useEffect(() => {
-    subscribeToPush(client.slug);
-  }, [client.slug]);
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    const channel = supabase
+      .channel("aitha-messages")
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "aitha",
+        table: "messages",
+        filter: `client_id=eq.${client.id}`,
+      }, (payload) => {
+        const msg = payload.new as AithaMessage;
+        if (msg.direction !== "inbound") return;
+        setCalls(prev => prev.map(c => {
+          if (c.id !== msg.call_id) return c;
+          return { ...c, call_status: "customer_replied", messages: [...(c.messages || []), msg] };
+        }));
+        setSelected(prev => {
+          if (!prev || prev.id !== msg.call_id) return prev;
+          return { ...prev, call_status: "customer_replied", messages: [...(prev.messages || []), msg] };
+        });
+        playPing();
+        showToast(`💬 New reply from ${msg.from_number || "customer"}`);
+        if (Notification.permission === "granted") {
+          new Notification("New message — Aitha", {
+            body: `${msg.from_number}: ${trunc(msg.body, 80)}`,
+            icon: "/icon-192.png",
+          });
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [client.id]);
 
-  const markDone = useCallback(async (row: Submission) => {
-    setMarking(String(row.id));
+  function showToast(msg: string) {
+    setToast(msg);
+    clearTimeout(toastRef.current);
+    toastRef.current = setTimeout(() => setToast(null), 4000);
+  }
+
+  async function enablePush() {
+    if (!("Notification" in window)) return;
+    const r = await Notification.requestPermission();
+    setPushOn(r === "granted");
+    setShowBanner(false);
+    if (r === "granted") showToast("🔔 Notifications enabled");
+  }
+
+  const sendSMS = useCallback(async () => {
+    if (!reply.trim() || !selected || sending) return;
+    setSending(true);
     try {
-      // Update the sheet
-      await fetch("/api/sheets/update", {
+      const res = await fetch("/api/send-sms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sheetId: client.sheet_id,
-          rowIndex: row.id,
-          status: "Done",
+          to: selected.caller_number,
+          from: client.aitha_phone,
+          body: reply.trim(),
+          callId: selected.id,
+          clientId: client.id,
         }),
       });
-      // Remove from UI
-      setSubmissions(prev => prev.filter(s => s.id !== row.id));
-    } finally {
-      setMarking(null);
+      if (!res.ok) throw new Error("Failed to send");
+      const newMsg: AithaMessage = {
+        id: Date.now().toString(),
+        call_id: selected.id,
+        client_id: client.id,
+        direction: "outbound_owner",
+        body: reply.trim(),
+        from_number: client.aitha_phone,
+        to_number: selected.caller_number,
+        created_at: new Date().toISOString(),
+      };
+      setCalls(prev => prev.map(c =>
+        c.id !== selected.id ? c : { ...c, call_status: "owner_replied", messages: [...(c.messages || []), newMsg] }
+      ));
+      setSelected(prev => prev ? { ...prev, call_status: "owner_replied", messages: [...(prev.messages || []), newMsg] } : prev);
+      setReply("");
+      showToast("✓ Text sent");
+    } catch {
+      showToast("Failed to send — try again");
     }
-  }, [client.sheet_id]);
+    setSending(false);
+  }, [reply, selected, sending, client]);
 
-  const counts = {
-    all: submissions.length,
-    new: submissions.filter(s => !s.status || s.status.toLowerCase() === "new").length,
-    done: submissions.filter(s => s.status?.toLowerCase() === "done").length,
-  };
+  async function resolve() {
+    if (!selected) return;
+    await fetch("/api/send-sms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolve: true, callId: selected.id }),
+    });
+    setCalls(prev => prev.map(c => c.id !== selected.id ? c : { ...c, call_status: "resolved" }));
+    setSelected(null);
+    showToast("✓ Resolved");
+  }
 
-  const filtered = submissions.filter(s => {
-    const status = (s.status ?? "new").toLowerCase();
-    const matchesFilter = filter === "all" || status === filter;
-    const term = search.toLowerCase();
-    const matchesSearch = !term ||
-      String(s.caller_name ?? "").toLowerCase().includes(term) ||
-      String(s.caller_number ?? "").toLowerCase().includes(term) ||
-      String(s.problem ?? "").toLowerCase().includes(term) ||
-      String(s.vehicle ?? "").toLowerCase().includes(term);
-    return matchesFilter && matchesSearch;
-  });
+  function formatTime(iso: string) {
+    const d = new Date(iso);
+    const isToday = d.toDateString() === new Date().toDateString();
+    const t = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return isToday ? `Today, ${t}` : `Yesterday, ${t}`;
+  }
+
+  const filtered     = tab === "all" ? calls : calls.filter(c => c.call_status === tab);
+  const unread       = calls.filter(c => c.call_status === "customer_replied").length;
+  const urgent       = calls.filter(c => c.urgency === "immediate" && c.call_status !== "resolved").length;
+  const todayCount   = calls.filter(c => new Date(c.created_at).toDateString() === new Date().toDateString()).length;
+  const resolvedCount = calls.filter(c => c.call_status === "resolved").length;
 
   return (
     <div className={styles.page}>
       <div className={styles.widget}>
 
+        {/* TOAST */}
+        {toast && <div className={styles.toast}>{toast}</div>}
+
+        {/* PUSH BANNER */}
+        {showBanner && !pushOn && (
+          <div className={styles.pushBanner}>
+            <span>🔔 Get notified when customers reply</span>
+            <div className={styles.pushBannerBtns}>
+              <button className={styles.pushAllow} onClick={enablePush}>Allow</button>
+              <button className={styles.pushSkip} onClick={() => setShowBanner(false)}>Later</button>
+            </div>
+          </div>
+        )}
+
+        {/* HEADER */}
         <div className={styles.header}>
           <div className={styles.headerLeft}>
-            <span className={styles.logo}>Task<span className={styles.logoAccent}>Rocket</span></span>
-            <span className={styles.divider}>|</span>
-            <span className={styles.clientName}>{client.business_name}</span>
-          </div>
-          <div className={styles.filters}>
-            {[
-              { key: "all", label: `All · ${counts.all}` },
-              { key: "new", label: `New · ${counts.new}` },
-              { key: "done", label: `Done · ${counts.done}` },
-            ].map(({ key, label }) => (
-              <button
-                key={key}
-                className={`${styles.filterBtn} ${filter === key ? styles.filterActive : ""}`}
-                onClick={() => setFilter(key)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className={styles.searchBar}>
-          <input
-            className={styles.search}
-            placeholder="Search name, vehicle, problem…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          <button
-            className={`${styles.refreshBtn} ${loading ? styles.spinning : ""}`}
-            onClick={refresh}
-            disabled={loading}
-            title="Refresh"
-          >
-            ↻
-          </button>
-        </div>
-
-        <div className={styles.cards}>
-          {filtered.length === 0 ? (
-            <div className={styles.empty}>
-              <p>No {filter === "all" ? "" : filter + " "}leads.</p>
-              <p className={styles.emptyHint}>Missed calls will appear here automatically.</p>
+            <svg width="28" height="28" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+              <path d="M7 21V18C7 11.9 11.9 7 18 7C24.1 7 29 11.9 29 18V21" stroke="#2DD4BF" strokeWidth="2.2" strokeLinecap="round"/>
+              <rect x="6" y="20" width="6" height="9" rx="2.5" fill="#2DD4BF"/>
+              <rect x="24" y="20" width="6" height="9" rx="2.5" fill="#2DD4BF"/>
+              <circle cx="27" cy="30" r="2.4" fill="#FF7A30"/>
+            </svg>
+            <div>
+              <div className={styles.brand}>Aitha<span className={styles.brandDot}>.</span></div>
+              <div className={styles.clientName}>{client.business_name}</div>
             </div>
-          ) : (
-            filtered.map((row, i) => {
-              const status = (row.status ?? "new").toLowerCase();
-              const colorKey = STATUS_COLORS[status] ?? "yellow";
-              const isNew = status === "new";
-              const isMarking = marking === String(row.id);
-              return (
-                <div
-                  key={row.id ?? i}
-                  className={`${styles.leadCard} ${isNew ? styles.leadCardNew : ""}`}
-                >
-                  <div>
-                    <div className={styles.leadName}>{row.caller_name || "Unknown Caller"}</div>
-                    <div className={styles.leadPhone}>
-                      {row.caller_number ? formatPhone(String(row.caller_number)) : "—"}
-                      {row.call_time ? ` · ${formatDate(String(row.call_time))}` : ""}
-                    </div>
-                  </div>
+          </div>
+          <div className={styles.headerRight}>
+            {urgent > 0 && <div className={styles.urgPill}>🔴 {urgent} urgent</div>}
+            {unread > 0 && <div className={styles.newPill}>{unread} new</div>}
+            <button
+              className={styles.notifBtn}
+              style={{ color: pushOn ? "#2DD4BF" : "#6B7A99" }}
+              onClick={() => !pushOn && enablePush()}
+              aria-label="Toggle notifications"
+            >
+              {pushOn ? "🔔" : "🔕"}
+            </button>
+            <div className={styles.liveDot} />
+          </div>
+        </div>
 
-                  <div>
-                    <div className={styles.leadFieldLabel}>Vehicle</div>
-                    <div className={styles.leadFieldValue}>{String(row.vehicle || "—")}</div>
-                  </div>
+        {/* STATS */}
+        <div className={styles.stats}>
+          {[
+            { lbl: "Today",   val: todayCount,    hi: false },
+            { lbl: "Reply",   val: unread,        hi: unread > 0,  click: () => setTab("customer_replied") },
+            { lbl: "Done",    val: resolvedCount, hi: false,       click: undefined },
+            { lbl: "Urgent",  val: urgent,        hi: urgent > 0,  click: undefined },
+          ].map(st => (
+            <div key={st.lbl} className={styles.stat} onClick={st.click} style={{ cursor: st.click ? "pointer" : "default" }}>
+              <div className={styles.statVal} style={{ color: st.hi ? "#FF7A30" : "#F0F4FF" }}>{st.val}</div>
+              <div className={styles.statLbl}>{st.lbl}</div>
+            </div>
+          ))}
+        </div>
 
-                  <div>
-                    <div className={styles.leadFieldLabel}>Problem</div>
-                    <div className={styles.leadProblemValue}>{String(row.problem || "—")}</div>
-                  </div>
+        {/* TABS */}
+        <div className={styles.tabs}>
+          {[
+            { key: "all",              lbl: "All" },
+            { key: "customer_replied", lbl: "Needs Reply", badge: unread },
+            { key: "ai_texted",        lbl: "AI Texted" },
+            { key: "missed",           lbl: "Missed" },
+            { key: "resolved",         lbl: "Done" },
+          ].map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`${styles.tab} ${tab === t.key ? styles.tabOn : ""}`}>
+              {t.lbl}
+              {t.badge && t.badge > 0 ? <span className={styles.tabBadge}>{t.badge}</span> : null}
+            </button>
+          ))}
+        </div>
 
-                  <div className={styles.leadActions}>
-                    <span className={`${styles.pill} ${styles[`pill_${colorKey}`]}`}>{status}</span>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      {!!row.conversation && (
-                        <button className={styles.viewBtn} onClick={() => setModalRow(row)}>
-                          Convo
-                        </button>
-                      )}
-                      {isNew && (
-                        <button
-                          className={styles.doneBtn}
-                          onClick={() => markDone(row)}
-                          disabled={isMarking}
-                        >
-                          {isMarking ? "…" : "✓ Done"}
-                        </button>
-                      )}
-                    </div>
+        {/* CALLS LIST */}
+        <div className={styles.list}>
+          {filtered.length === 0 && (
+            <div className={styles.empty}>
+              <p>No calls here</p>
+              <p className={styles.emptyHint}>Missed calls will appear automatically</p>
+            </div>
+          )}
+          {filtered.map(call => {
+            const st  = STATUS[call.call_status] || STATUS.missed;
+            const ug  = URGENCY[call.urgency || "info_only"] || URGENCY.info_only;
+            const msgs = call.messages || [];
+            const last = msgs[msgs.length - 1];
+            const preview = trunc(last?.body || call.ai_response_sent, 48);
+            const isNew = call.call_status === "customer_replied";
+            return (
+              <div key={call.id} onClick={() => { setSelected(call); setReply(""); }}
+                className={`${styles.row} ${isNew ? styles.rowNew : ""}`}>
+                {isNew && <div className={styles.unreadDot} />}
+                <div style={{ minWidth: 0 }}>
+                  <div className={styles.callerNum}>{call.caller_number}</div>
+                  <div className={styles.callTime}>{formatTime(call.created_at)}</div>
+                </div>
+                <div style={{ minWidth: 0, overflow: "hidden" }}>
+                  <div className={styles.preview}>{preview}</div>
+                  <div className={styles.callTags}>
+                    {call.voicemail_transcript && <span className={styles.vmTag}>🎙 VM</span>}
+                    <span style={{ fontSize: "10px", color: ug.color }}>{ug.label}</span>
                   </div>
                 </div>
-              );
-            })
-          )}
-        </div>
-
-        <div className={styles.footer}>
-          <span className={styles.footerText}>
-            Twilio · {client.twilio_number ? formatPhone(client.twilio_number) : "—"}
-          </span>
-          <span className={styles.footerText}>dashboard.taskrocket.org</span>
-        </div>
-      </div>
-
-      {modalRow && (
-        <div className={styles.modalOverlay} onClick={() => setModalRow(null)}>
-          <div className={styles.modal} onClick={e => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div>
-                <div className={styles.modalTitle}>{modalRow.caller_name || "Unknown Caller"}</div>
-                <div className={styles.modalSub}>
-                  {modalRow.caller_number ? formatPhone(String(modalRow.caller_number)) : ""}
-                  {modalRow.call_time ? ` · ${formatDate(String(modalRow.call_time))}` : ""}
+                <div className={styles.statusPill} style={{ color: st.color, background: st.bg }}>
+                  {st.label}
                 </div>
               </div>
-              <button className={styles.modalClose} onClick={() => setModalRow(null)}>✕</button>
-            </div>
-            <div className={styles.modalBody}>
-              <pre className={styles.conversation}>{String(modalRow.conversation ?? "")}</pre>
+            );
+          })}
+        </div>
+
+        {/* FOOTER */}
+        <div className={styles.footer}>
+          <span className={styles.footerText}>Aitha · {client.aitha_phone}</span>
+          <span className={styles.footerText}>powered by TaskRocket</span>
+        </div>
+
+      </div>
+
+      {/* MODAL */}
+      {selected && (() => {
+        const st  = STATUS[selected.call_status] || STATUS.missed;
+        const ug  = URGENCY[selected.urgency || "info_only"] || URGENCY.info_only;
+        const msgs = selected.messages || [];
+        return (
+          <div className={styles.modalOverlay} onClick={() => setSelected(null)}>
+            <div className={styles.modal} onClick={e => e.stopPropagation()}>
+
+              <div className={styles.dragHandle} />
+
+              <div className={styles.modalHeader}>
+                <div>
+                  <div className={styles.modalNum}>{selected.caller_number}</div>
+                  <div className={styles.modalMeta}>
+                    <span style={{ color: ug.color }}>{ug.label}</span>
+                    <span className={styles.metaSep}>·</span>
+                    <span style={{ color: st.color }}>{st.label}</span>
+                    <span className={styles.metaSep}>·</span>
+                    <span>{formatTime(selected.created_at)}</span>
+                  </div>
+                </div>
+                <div className={styles.modalActions}>
+                  {selected.call_status !== "resolved" && (
+                    <button className={styles.resolveBtn} onClick={resolve}>✓ Resolve</button>
+                  )}
+                  <button className={styles.closeBtn} onClick={() => setSelected(null)}>✕</button>
+                </div>
+              </div>
+
+              {/* Voicemail */}
+              {selected.voicemail_transcript && (
+                <div className={styles.vmBox}>
+                  <div className={styles.vmLabel}>🎙 Voicemail transcript</div>
+                  <div className={styles.vmText}>{selected.voicemail_transcript}</div>
+                </div>
+              )}
+
+              {/* Thread */}
+              <div className={styles.thread} ref={threadRef}>
+                {selected.ai_response_sent && msgs.length === 0 && (
+                  <div className={`${styles.msgWrap} ${styles.msgRight}`}>
+                    <div className={`${styles.bubble} ${styles.bubbleAI}`}>{selected.ai_response_sent}</div>
+                    <div className={`${styles.msgTime}`} style={{ textAlign: "right" }}>Aitha</div>
+                  </div>
+                )}
+                {msgs.map((m, i) => {
+                  const isIn    = m.direction === "inbound";
+                  const isAI    = m.direction === "outbound_ai";
+                  const isOwner = m.direction === "outbound_owner";
+                  return (
+                    <div key={i} className={`${styles.msgWrap} ${isIn ? styles.msgLeft : styles.msgRight}`}>
+                      <div className={`${styles.bubble} ${isIn ? styles.bubbleIn : isAI ? styles.bubbleAI : styles.bubbleOwner}`}>
+                        {m.body}
+                      </div>
+                      <div className={styles.msgTime} style={{ textAlign: isIn ? "left" : "right" }}>
+                        {isAI ? "Aitha" : isOwner ? "You" : "Customer"}
+                        {" · "}
+                        {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Reply bar */}
+              {selected.call_status !== "resolved" ? (
+                <div className={styles.replyBar}>
+                  <textarea
+                    className={styles.replyInput}
+                    placeholder="Type a reply… (Enter to send)"
+                    value={reply}
+                    rows={2}
+                    onChange={e => setReply(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendSMS(); } }}
+                  />
+                  <button
+                    className={styles.sendBtn}
+                    style={{ opacity: reply.trim() && !sending ? 1 : 0.4 }}
+                    onClick={sendSMS}
+                    disabled={!reply.trim() || sending}
+                  >
+                    {sending ? "Sending…" : "Send Text →"}
+                  </button>
+                </div>
+              ) : (
+                <div className={styles.resolvedBar}>✓ This conversation is resolved</div>
+              )}
+
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
