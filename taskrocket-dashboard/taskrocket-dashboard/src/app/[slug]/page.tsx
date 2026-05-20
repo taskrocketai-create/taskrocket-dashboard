@@ -14,27 +14,13 @@ async function getClientBySlug(slug: string): Promise<AithaClient | null> {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
   );
-
-  // Look up client by matching owner_email slug or aitha_phone slug
-  // Slug format: graysons-auto maps to business_name
   const { data } = await supabase
     .schema("aitha")
     .from("clients")
     .select("*")
-    .ilike("business_name", slug.replace(/-/g, " "))
+    .eq("slug", slug)
     .single();
-
-  if (data) return data;
-
-  // Fallback: match by id
-  const { data: byId } = await supabase
-    .schema("aitha")
-    .from("clients")
-    .select("*")
-    .eq("id", slug)
-    .single();
-
-  return byId;
+  return data;
 }
 
 async function getCalls(clientId: string): Promise<AithaCall[]> {
