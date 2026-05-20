@@ -50,7 +50,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
   const [pushOn, setPushOn]         = useState(false);
   const [showBanner, setShowBanner] = useState(false);
   const [toast, setToast]           = useState<string | null>(null);
-  const toastRef                    = useRef<ReturnType<typeof setTimeout>>();
+  const toastRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const threadRef                   = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
