@@ -2,19 +2,19 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const viewport: Viewport = {
-  themeColor: "#141d4a",
+  themeColor: "#101828",
   width: "device-width",
   initialScale: 1,
 };
 
 export const metadata: Metadata = {
-  title: "TaskRocket Dashboard",
-  description: "Missed call leads dashboard powered by TaskRocket",
+  title: "Aitha Dashboard",
+  description: "The Modern Front Desk — missed call management powered by Aitha",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "TaskRocket",
+    title: "Aitha",
   },
   icons: {
     icon: "/icon-192.png",
@@ -30,7 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content="TaskRocket" />
+        <meta name="apple-mobile-web-app-title" content="Aitha" />
         <link rel="apple-touch-icon" href="/icon-192.png" />
       </head>
       <body>
