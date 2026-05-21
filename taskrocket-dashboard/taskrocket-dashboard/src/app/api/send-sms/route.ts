@@ -3,12 +3,25 @@ import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: NextRequest) {
   try {
-    const { to, from, body, callId, clientId } = await req.json();
+    const { to, from, body, callId, clientId, resolve } = await req.json();
+
+    // Handle resolve-only requests
+    if (resolve && callId) {
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_KEY!
+      );
+      await supabase
+        .from("calls")
+        .update({ call_status: "resolved" })
+        .eq("id", callId);
+      return NextResponse.json({ ok: true });
+    }
+
     if (!to || !from || !body) {
       return NextResponse.json({ error: "Missing fields" }, { status: 400 });
     }
 
-    // Send SMS via Twilio
     const accountSid = process.env.TWILIO_ACCOUNT_SID!;
     const authToken = process.env.TWILIO_AUTH_TOKEN!;
 
@@ -31,13 +44,12 @@ export async function POST(req: NextRequest) {
 
     const twilioData = await twilioRes.json();
 
-    // Log message to Supabase
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_KEY!
     );
 
-    await supabase.schema("aitha").from("messages").insert({
+    await supabase.from("messages").insert({
       call_id: callId,
       client_id: clientId,
       direction: "outbound_owner",
@@ -48,7 +60,6 @@ export async function POST(req: NextRequest) {
     });
 
     await supabase
-      .schema("aitha")
       .from("calls")
       .update({ call_status: "owner_replied" })
       .eq("id", callId);
