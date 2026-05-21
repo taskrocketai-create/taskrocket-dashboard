@@ -7,13 +7,15 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
-  const { data: clients } = await supabase
-    .schema("aitha")
+
+  const { data: clients, error } = await supabase
     .from("clients")
     .select("*")
     .order("business_name");
+
+  console.log("clients:", clients, "error:", error);
 
   return (
     <main className={styles.main}>
