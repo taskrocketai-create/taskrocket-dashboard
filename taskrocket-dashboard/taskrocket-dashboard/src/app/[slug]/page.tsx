@@ -15,7 +15,6 @@ async function getClientBySlug(slug: string): Promise<AithaClient | null> {
     process.env.SUPABASE_SERVICE_KEY!
   );
   const { data } = await supabase
-    .schema("aitha")
     .from("clients")
     .select("*")
     .eq("slug", slug)
@@ -30,7 +29,6 @@ async function getCalls(clientId: string): Promise<AithaCall[]> {
   );
 
   const { data } = await supabase
-    .schema("aitha")
     .from("calls")
     .select("*, messages(*)")
     .eq("client_id", clientId)
