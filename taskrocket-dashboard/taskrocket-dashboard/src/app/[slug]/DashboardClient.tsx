@@ -51,7 +51,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
   const [showBanner, setShowBanner] = useState(false);
   const [toast, setToast]           = useState<string | null>(null);
   const toastRef = useRef<number | undefined>(undefined);
-  const threadRef                   = useRef<HTMLDivElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if ("Notification" in window) {
@@ -74,7 +74,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
       .channel("aitha-messages")
       .on("postgres_changes", {
         event: "INSERT",
-        schema: "aitha",
+        schema: "public",
         table: "messages",
         filter: `client_id=eq.${client.id}`,
       }, (payload) => {
@@ -104,7 +104,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
   function showToast(msg: string) {
     setToast(msg);
     clearTimeout(toastRef.current);
-   toastRef.current = setTimeout(() => setToast(null), 4000) as unknown as number;
+    toastRef.current = setTimeout(() => setToast(null), 4000) as unknown as number;
   }
 
   async function enablePush() {
@@ -172,20 +172,18 @@ export default function DashboardClient({ client, initialCalls }: Props) {
     return isToday ? `Today, ${t}` : `Yesterday, ${t}`;
   }
 
-  const filtered     = tab === "all" ? calls : calls.filter(c => c.call_status === tab);
-  const unread       = calls.filter(c => c.call_status === "customer_replied").length;
-  const urgent       = calls.filter(c => c.urgency === "immediate" && c.call_status !== "resolved").length;
-  const todayCount   = calls.filter(c => new Date(c.created_at).toDateString() === new Date().toDateString()).length;
+  const filtered      = tab === "all" ? calls : calls.filter(c => c.call_status === tab);
+  const unread        = calls.filter(c => c.call_status === "customer_replied").length;
+  const urgent        = calls.filter(c => c.urgency === "immediate" && c.call_status !== "resolved").length;
+  const todayCount    = calls.filter(c => new Date(c.created_at).toDateString() === new Date().toDateString()).length;
   const resolvedCount = calls.filter(c => c.call_status === "resolved").length;
 
   return (
     <div className={styles.page}>
       <div className={styles.widget}>
 
-        {/* TOAST */}
         {toast && <div className={styles.toast}>{toast}</div>}
 
-        {/* PUSH BANNER */}
         {showBanner && !pushOn && (
           <div className={styles.pushBanner}>
             <span>🔔 Get notified when customers reply</span>
@@ -196,7 +194,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
           </div>
         )}
 
-        {/* HEADER */}
         <div className={styles.header}>
           <div className={styles.headerLeft}>
             <svg width="28" height="28" viewBox="0 0 36 36" fill="none" aria-hidden="true">
@@ -225,13 +222,12 @@ export default function DashboardClient({ client, initialCalls }: Props) {
           </div>
         </div>
 
-        {/* STATS */}
         <div className={styles.stats}>
           {[
-            { lbl: "Today",   val: todayCount,    hi: false },
-            { lbl: "Reply",   val: unread,        hi: unread > 0,  click: () => setTab("customer_replied") },
-            { lbl: "Done",    val: resolvedCount, hi: false,       click: undefined },
-            { lbl: "Urgent",  val: urgent,        hi: urgent > 0,  click: undefined },
+            { lbl: "Today",  val: todayCount,    hi: false },
+            { lbl: "Reply",  val: unread,        hi: unread > 0,  click: () => setTab("customer_replied") },
+            { lbl: "Done",   val: resolvedCount, hi: false },
+            { lbl: "Urgent", val: urgent,        hi: urgent > 0 },
           ].map(st => (
             <div key={st.lbl} className={styles.stat} onClick={st.click} style={{ cursor: st.click ? "pointer" : "default" }}>
               <div className={styles.statVal} style={{ color: st.hi ? "#FF7A30" : "#F0F4FF" }}>{st.val}</div>
@@ -240,7 +236,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
           ))}
         </div>
 
-        {/* TABS */}
         <div className={styles.tabs}>
           {[
             { key: "all",              lbl: "All" },
@@ -257,7 +252,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
           ))}
         </div>
 
-        {/* CALLS LIST */}
         <div className={styles.list}>
           {filtered.length === 0 && (
             <div className={styles.empty}>
@@ -295,7 +289,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
           })}
         </div>
 
-        {/* FOOTER */}
         <div className={styles.footer}>
           <span className={styles.footerText}>Aitha · {client.aitha_phone}</span>
           <span className={styles.footerText}>powered by TaskRocket</span>
@@ -303,7 +296,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
 
       </div>
 
-      {/* MODAL */}
       {selected && (() => {
         const st  = STATUS[selected.call_status] || STATUS.missed;
         const ug  = URGENCY[selected.urgency || "info_only"] || URGENCY.info_only;
@@ -333,7 +325,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
                 </div>
               </div>
 
-              {/* Voicemail */}
               {selected.voicemail_transcript && (
                 <div className={styles.vmBox}>
                   <div className={styles.vmLabel}>🎙 Voicemail transcript</div>
@@ -341,25 +332,23 @@ export default function DashboardClient({ client, initialCalls }: Props) {
                 </div>
               )}
 
-              {/* Thread */}
               <div className={styles.thread} ref={threadRef}>
                 {selected.ai_response_sent && msgs.length === 0 && (
                   <div className={`${styles.msgWrap} ${styles.msgRight}`}>
                     <div className={`${styles.bubble} ${styles.bubbleAI}`}>{selected.ai_response_sent}</div>
-                    <div className={`${styles.msgTime}`} style={{ textAlign: "right" }}>Aitha</div>
+                    <div className={styles.msgTime} style={{ textAlign: "right" }}>Aitha</div>
                   </div>
                 )}
                 {msgs.map((m, i) => {
                   const isIn    = m.direction === "inbound";
                   const isAI    = m.direction === "outbound_ai";
-                  const isOwner = m.direction === "outbound_owner";
                   return (
                     <div key={i} className={`${styles.msgWrap} ${isIn ? styles.msgLeft : styles.msgRight}`}>
                       <div className={`${styles.bubble} ${isIn ? styles.bubbleIn : isAI ? styles.bubbleAI : styles.bubbleOwner}`}>
                         {m.body}
                       </div>
                       <div className={styles.msgTime} style={{ textAlign: isIn ? "left" : "right" }}>
-                        {isAI ? "Aitha" : isOwner ? "You" : "Customer"}
+                        {isAI ? "Aitha" : isIn ? "Customer" : "You"}
                         {" · "}
                         {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                       </div>
@@ -368,7 +357,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
                 })}
               </div>
 
-              {/* Reply bar */}
               {selected.call_status !== "resolved" ? (
                 <div className={styles.replyBar}>
                   <textarea
