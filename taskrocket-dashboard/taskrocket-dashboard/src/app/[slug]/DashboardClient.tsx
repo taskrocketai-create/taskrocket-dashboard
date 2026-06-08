@@ -72,7 +72,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
 
     const channel = supabase
       .channel("aitha-realtime")
-      // New call arrives — update list silently, no notification
       .on("postgres_changes", {
         event: "INSERT",
         schema: "public",
@@ -81,7 +80,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
       }, (payload) => {
         const call = payload.new as AithaCall;
         setCalls(prev => [{ ...call, messages: [] }, ...prev]);
-        // Only notify if urgent
         if (call.urgency === "immediate") {
           playPing();
           showToast(`🔴 Urgent call from ${call.caller_number}`);
@@ -93,7 +91,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
           }
         }
       })
-      // Call status updated — notify when ready to schedule
       .on("postgres_changes", {
         event: "UPDATE",
         schema: "public",
@@ -103,7 +100,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
         const updated = payload.new as AithaCall;
         setCalls(prev => prev.map(c => c.id === updated.id ? { ...c, ...updated } : c));
         setSelected(prev => prev?.id === updated.id ? { ...prev, ...updated } : prev);
-        // Notify Brian when AI has finished gathering info
         if (updated.call_status === "resolved") {
           playPing();
           showToast(`✅ Ready to schedule — ${updated.caller_number}`);
@@ -115,7 +111,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
           }
         }
       })
-      // New message — update thread silently
       .on("postgres_changes", {
         event: "INSERT",
         schema: "public",
@@ -123,14 +118,19 @@ export default function DashboardClient({ client, initialCalls }: Props) {
         filter: `client_id=eq.${client.id}`,
       }, (payload) => {
         const msg = payload.new as AithaMessage;
-        // Update thread for open conversation
         setCalls(prev => prev.map(c => {
           if (c.id !== msg.call_id) return c;
-          return { ...c, messages: [...(c.messages || []), msg] };
+          const existing = c.messages || [];
+          const alreadyExists = existing.some(m => m.id === msg.id);
+          if (alreadyExists) return c;
+          return { ...c, messages: [...existing, msg] };
         }));
         setSelected(prev => {
           if (!prev || prev.id !== msg.call_id) return prev;
-          return { ...prev, messages: [...(prev.messages || []), msg] };
+          const existing = prev.messages || [];
+          const alreadyExists = existing.some(m => m.id === msg.id);
+          if (alreadyExists) return prev;
+          return { ...prev, messages: [...existing, msg] };
         });
       })
       .subscribe();
@@ -150,6 +150,13 @@ export default function DashboardClient({ client, initialCalls }: Props) {
     setPushOn(r === "granted");
     setShowBanner(false);
     if (r === "granted") showToast("🔔 Notifications enabled");
+  }
+
+  async function openCall(call: AithaCall) {
+    setReply("");
+    const res = await fetch(`/api/get-messages?callId=${call.id}`);
+    const msgs = await res.json();
+    setSelected({ ...call, messages: msgs });
   }
 
   const sendSMS = useCallback(async () => {
@@ -312,14 +319,14 @@ export default function DashboardClient({ client, initialCalls }: Props) {
             </div>
           )}
           {filtered.map(call => {
-            const st  = STATUS[call.call_status] || STATUS.missed;
-            const ug  = URGENCY[call.urgency || "info_only"] || URGENCY.info_only;
+            const st   = STATUS[call.call_status] || STATUS.missed;
+            const ug   = URGENCY[call.urgency || "info_only"] || URGENCY.info_only;
             const msgs = call.messages || [];
             const last = msgs[msgs.length - 1];
             const preview = trunc(last?.body || call.ai_response_sent, 48);
             const isNew = call.call_status === "customer_replied";
             return (
-              <div key={call.id} onClick={() => { setSelected(call); setReply(""); }}
+              <div key={call.id} onClick={() => openCall(call)}
                 className={`${styles.row} ${isNew ? styles.rowNew : ""}`}>
                 {isNew && <div className={styles.unreadDot} />}
                 <div style={{ minWidth: 0 }}>
@@ -367,9 +374,10 @@ export default function DashboardClient({ client, initialCalls }: Props) {
       </div>
 
       {selected && (() => {
-        const st  = STATUS[selected.call_status] || STATUS.missed;
-        const ug  = URGENCY[selected.urgency || "info_only"] || URGENCY.info_only;
+        const st   = STATUS[selected.call_status] || STATUS.missed;
+        const ug   = URGENCY[selected.urgency || "info_only"] || URGENCY.info_only;
         const msgs = selected.messages || [];
+        const hasOutboundAI = msgs.some(m => m.direction === "outbound_ai");
         return (
           <div className={styles.modalOverlay} onClick={() => setSelected(null)}>
             <div className={styles.modal} onClick={e => e.stopPropagation()}>
@@ -410,7 +418,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
               )}
 
               <div className={styles.thread} ref={threadRef}>
-                {selected.ai_response_sent && msgs.length === 0 && (
+                {selected.ai_response_sent && !hasOutboundAI && (
                   <div className={`${styles.msgWrap} ${styles.msgRight}`}>
                     <div className={`${styles.bubble} ${styles.bubbleAI}`}>{selected.ai_response_sent}</div>
                     <div className={styles.msgTime} style={{ textAlign: "right" }}>Aitha</div>
