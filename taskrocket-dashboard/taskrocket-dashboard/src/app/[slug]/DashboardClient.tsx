@@ -72,6 +72,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
 
     const channel = supabase
       .channel("aitha-realtime")
+      // New call arrives — update list silently, no notification
       .on("postgres_changes", {
         event: "INSERT",
         schema: "public",
@@ -80,15 +81,41 @@ export default function DashboardClient({ client, initialCalls }: Props) {
       }, (payload) => {
         const call = payload.new as AithaCall;
         setCalls(prev => [{ ...call, messages: [] }, ...prev]);
-        playPing();
-        showToast(`📞 New call from ${call.caller_number}`);
-        if (Notification.permission === "granted") {
-          new Notification("New call — Aitha", {
-            body: `Missed call from ${call.caller_number}`,
-            icon: "/icon-192.png",
-          });
+        // Only notify if urgent
+        if (call.urgency === "immediate") {
+          playPing();
+          showToast(`🔴 Urgent call from ${call.caller_number}`);
+          if (Notification.permission === "granted") {
+            new Notification("🔴 Urgent call — Aitha", {
+              body: `Needs immediate attention: ${call.caller_number}`,
+              icon: "/icon-192.png",
+            });
+          }
         }
       })
+      // Call status updated — notify when ready to schedule
+      .on("postgres_changes", {
+        event: "UPDATE",
+        schema: "public",
+        table: "calls",
+        filter: `client_id=eq.${client.id}`,
+      }, (payload) => {
+        const updated = payload.new as AithaCall;
+        setCalls(prev => prev.map(c => c.id === updated.id ? { ...c, ...updated } : c));
+        setSelected(prev => prev?.id === updated.id ? { ...prev, ...updated } : prev);
+        // Notify Brian when AI has finished gathering info
+        if (updated.call_status === "resolved") {
+          playPing();
+          showToast(`✅ Ready to schedule — ${updated.caller_number}`);
+          if (Notification.permission === "granted") {
+            new Notification("Ready to schedule — Aitha", {
+              body: `${updated.caller_number} is ready to book. Give them a call!`,
+              icon: "/icon-192.png",
+            });
+          }
+        }
+      })
+      // New message — update thread silently
       .on("postgres_changes", {
         event: "INSERT",
         schema: "public",
@@ -96,23 +123,15 @@ export default function DashboardClient({ client, initialCalls }: Props) {
         filter: `client_id=eq.${client.id}`,
       }, (payload) => {
         const msg = payload.new as AithaMessage;
-        if (msg.direction !== "inbound") return;
+        // Update thread for open conversation
         setCalls(prev => prev.map(c => {
           if (c.id !== msg.call_id) return c;
-          return { ...c, call_status: "customer_replied", messages: [...(c.messages || []), msg] };
+          return { ...c, messages: [...(c.messages || []), msg] };
         }));
         setSelected(prev => {
           if (!prev || prev.id !== msg.call_id) return prev;
-          return { ...prev, call_status: "customer_replied", messages: [...(prev.messages || []), msg] };
+          return { ...prev, messages: [...(prev.messages || []), msg] };
         });
-        playPing();
-        showToast(`💬 New reply from ${msg.from_number || "customer"}`);
-        if (Notification.permission === "granted") {
-          new Notification("New message — Aitha", {
-            body: `${msg.from_number}: ${trunc(msg.body, 80)}`,
-            icon: "/icon-192.png",
-          });
-        }
       })
       .subscribe();
 
@@ -219,7 +238,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
 
         {showBanner && !pushOn && (
           <div className={styles.pushBanner}>
-            <span>🔔 Get notified when customers reply</span>
+            <span>🔔 Get notified when customers are ready to schedule</span>
             <div className={styles.pushBannerBtns}>
               <button className={styles.pushAllow} onClick={enablePush}>Allow</button>
               <button className={styles.pushSkip} onClick={() => setShowBanner(false)}>Later</button>
