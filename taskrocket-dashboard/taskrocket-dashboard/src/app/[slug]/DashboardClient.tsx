@@ -69,8 +69,26 @@ export default function DashboardClient({ client, initialCalls }: Props) {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
+
     const channel = supabase
-      .channel("aitha-messages")
+      .channel("aitha-realtime")
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "calls",
+        filter: `client_id=eq.${client.id}`,
+      }, (payload) => {
+        const call = payload.new as AithaCall;
+        setCalls(prev => [{ ...call, messages: [] }, ...prev]);
+        playPing();
+        showToast(`📞 New call from ${call.caller_number}`);
+        if (Notification.permission === "granted") {
+          new Notification("New call — Aitha", {
+            body: `Missed call from ${call.caller_number}`,
+            icon: "/icon-192.png",
+          });
+        }
+      })
       .on("postgres_changes", {
         event: "INSERT",
         schema: "public",
@@ -97,6 +115,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
         }
       })
       .subscribe();
+
     return () => { supabase.removeChannel(channel); };
   }, [client.id]);
 
@@ -292,10 +311,10 @@ export default function DashboardClient({ client, initialCalls }: Props) {
                   <div className={styles.preview}>{preview}</div>
                   <div className={styles.callTags}>
                     {call.voicemail_transcript && <span className={styles.vmTag}>🎙 VM</span>}
-                    <span style={{ fontSize: "10px", color: ug.color }}>{ug.label}</span>
+                    <span style={{ fontSize: "12px", color: ug.color }}>{ug.label}</span>
                   </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
                   <div className={styles.statusPill} style={{ color: st.color, background: st.bg }}>
                     {st.label}
                   </div>
@@ -306,7 +325,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
                       border: "none",
                       color: "#4B5568",
                       cursor: "pointer",
-                      fontSize: "14px",
+                      fontSize: "16px",
                       padding: "2px 4px",
                       lineHeight: 1,
                       flexShrink: 0,
@@ -379,8 +398,8 @@ export default function DashboardClient({ client, initialCalls }: Props) {
                   </div>
                 )}
                 {msgs.map((m, i) => {
-                  const isIn    = m.direction === "inbound";
-                  const isAI    = m.direction === "outbound_ai";
+                  const isIn = m.direction === "inbound";
+                  const isAI = m.direction === "outbound_ai";
                   return (
                     <div key={i} className={`${styles.msgWrap} ${isIn ? styles.msgLeft : styles.msgRight}`}>
                       <div className={`${styles.bubble} ${isIn ? styles.bubbleIn : isAI ? styles.bubbleAI : styles.bubbleOwner}`}>
