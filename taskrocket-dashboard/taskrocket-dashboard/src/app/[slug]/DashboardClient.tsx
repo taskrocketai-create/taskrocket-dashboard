@@ -64,7 +64,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
   }, [selected?.messages?.length]);
 
-  // Supabase Realtime
   useEffect(() => {
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -163,6 +162,21 @@ export default function DashboardClient({ client, initialCalls }: Props) {
     setCalls(prev => prev.map(c => c.id !== selected.id ? c : { ...c, call_status: "resolved" }));
     setSelected(null);
     showToast("✓ Resolved");
+  }
+
+  async function deleteCall(callId: string) {
+    try {
+      await fetch("/api/delete-call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callId }),
+      });
+      setCalls(prev => prev.filter(c => c.id !== callId));
+      if (selected?.id === callId) setSelected(null);
+      showToast("✓ Deleted");
+    } catch {
+      showToast("Failed to delete — try again");
+    }
   }
 
   function formatTime(iso: string) {
@@ -281,8 +295,26 @@ export default function DashboardClient({ client, initialCalls }: Props) {
                     <span style={{ fontSize: "10px", color: ug.color }}>{ug.label}</span>
                   </div>
                 </div>
-                <div className={styles.statusPill} style={{ color: st.color, background: st.bg }}>
-                  {st.label}
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                  <div className={styles.statusPill} style={{ color: st.color, background: st.bg }}>
+                    {st.label}
+                  </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteCall(call.id); }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#4B5568",
+                      cursor: "pointer",
+                      fontSize: "14px",
+                      padding: "2px 4px",
+                      lineHeight: 1,
+                      flexShrink: 0,
+                    }}
+                    aria-label="Delete"
+                  >
+                    🗑
+                  </button>
                 </div>
               </div>
             );
@@ -321,6 +353,13 @@ export default function DashboardClient({ client, initialCalls }: Props) {
                   {selected.call_status !== "resolved" && (
                     <button className={styles.resolveBtn} onClick={resolve}>✓ Resolve</button>
                   )}
+                  <button
+                    className={styles.resolveBtn}
+                    style={{ color: "#EF4444", borderColor: "rgba(239,68,68,0.22)", background: "rgba(239,68,68,0.1)" }}
+                    onClick={() => deleteCall(selected.id)}
+                  >
+                    🗑 Delete
+                  </button>
                   <button className={styles.closeBtn} onClick={() => setSelected(null)}>✕</button>
                 </div>
               </div>
