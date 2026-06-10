@@ -417,16 +417,21 @@ export default function DashboardClient({ client, initialCalls }: Props) {
 
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <div className={styles.brandMark}>A</div>
+          <svg width="32" height="32" viewBox="0 0 36 36" fill="none" aria-label="Aitha">
+            <path d="M7 21V18C7 11.9 11.9 7 18 7C24.1 7 29 11.9 29 18V21" stroke="#2DD4BF" strokeWidth="2.2" strokeLinecap="round"/>
+            <rect x="6" y="20" width="6" height="9" rx="2.5" fill="#2DD4BF"/>
+            <rect x="24" y="20" width="6" height="9" rx="2.5" fill="#2DD4BF"/>
+            <circle cx="27" cy="30" r="2.4" fill="#FF7A30"/>
+          </svg>
           <span className={styles.businessName}>{client.business_name}</span>
         </div>
         <div className={styles.headerRight}>
           <div className={styles.liveBadge}><div className={styles.liveDot} /> Live</div>
           <button
             className={styles.notifBtn}
-            style={{ color: pushOn ? "#2DD4BF" : "#4B5A6E" }}
-            onClick={enablePush}
-            title={pushOn ? "Notifications on" : "Click to enable notifications"}
+            style={{ color: pushOn ? "#2DD4BF" : "#4B5A6E", cursor: pushOn ? "default" : "pointer" }}
+            onClick={pushOn ? () => showToast("🔔 Notifications are on") : enablePush}
+            title={pushOn ? "Notifications are enabled" : "Click to enable notifications"}
           >
             {pushOn ? "🔔" : "🔕"}
           </button>
