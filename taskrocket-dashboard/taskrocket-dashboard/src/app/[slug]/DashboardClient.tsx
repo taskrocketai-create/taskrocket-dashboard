@@ -218,12 +218,11 @@ export default function DashboardClient({ client, initialCalls }: Props) {
   }, [reply, selected, sending, client]);
 
   async function markComplete(callId: string) {
-    await fetch("/api/send-sms", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ resolve: true, callId }),
-    });
+    await fetch(
+      `https://snzdwixepyatasvjjurk.supabase.co/functions/v1/aitha-log?action=update_call_status&call_id=${callId}&call_status=closed`,
+      { method: "GET", headers: { "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNuemR3aXhlcHlhdGFzdmpqdXJrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzQyNDU1NCwiZXhwIjoyMDkzMDAwNTU0fQ.0TNx7LvfX2_WSwTpHIV0ThnEWVo8JrDvDkkQDI79Ru0" } }
+    );
     setCalls(prev => prev.map(c => c.id !== callId ? c : { ...c, call_status: "closed" }));
-    setSelected(prev => prev?.id === callId ? { ...prev, call_status: "closed" } : prev);
     setSelected(null);
     showToast("✓ Call complete — archived");
   }
