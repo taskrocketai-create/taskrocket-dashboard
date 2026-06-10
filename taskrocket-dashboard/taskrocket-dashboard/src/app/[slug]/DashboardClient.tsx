@@ -319,9 +319,6 @@ export default function DashboardClient({ client, initialCalls }: Props) {
               <span>{formatTime(selected.created_at)}</span>
             </div>
             <div className={styles.drawerActions}>
-              <a href={`tel:${selected.caller_number}`} className={styles.btnCall} onClick={e => e.stopPropagation()}>
-                📞 Call Back
-              </a>
               {!isClosed && (
                 <button className={styles.btnComplete} onClick={() => markComplete(selected.id)}>
                   ✓ Complete
@@ -418,10 +415,17 @@ export default function DashboardClient({ client, initialCalls }: Props) {
       <div className={styles.header}>
         <div className={styles.headerLeft}>
           <svg width="32" height="32" viewBox="0 0 36 36" fill="none" aria-label="Aitha">
-            <path d="M7 21V18C7 11.9 11.9 7 18 7C24.1 7 29 11.9 29 18V21" stroke="#2DD4BF" strokeWidth="2.2" strokeLinecap="round"/>
-            <rect x="6" y="20" width="6" height="9" rx="2.5" fill="#2DD4BF"/>
-            <rect x="24" y="20" width="6" height="9" rx="2.5" fill="#2DD4BF"/>
-            <circle cx="27" cy="30" r="2.4" fill="#FF7A30"/>
+            {/* Headband */}
+            <path d="M7.5 19V18C7.5 12.2 12.2 7.5 18 7.5C23.8 7.5 28.5 12.2 28.5 18V19" stroke="#2DD4BF" strokeWidth="2.6" strokeLinecap="round"/>
+            {/* Ear cups */}
+            <rect x="5.5" y="17.5" width="5" height="8.5" rx="2.4" fill="#2DD4BF"/>
+            <rect x="25.5" y="17.5" width="5" height="8.5" rx="2.4" fill="#2DD4BF"/>
+            {/* Boom mic */}
+            <path d="M28 26C28 29.5 25.5 31 21.5 31" stroke="#2DD4BF" strokeWidth="2" strokeLinecap="round"/>
+            <circle cx="21.5" cy="31" r="2.2" fill="#FF7A30"/>
+            {/* The A — light so it reads on the dark navy header */}
+            <path d="M13.4 25.5L18 11.5L22.6 25.5" stroke="#F4F7FB" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M15.2 21.4Q18 19.6 20.8 21.4" stroke="#F4F7FB" strokeWidth="2.2" strokeLinecap="round"/>
           </svg>
           <span className={styles.businessName}>{client.business_name}</span>
         </div>
