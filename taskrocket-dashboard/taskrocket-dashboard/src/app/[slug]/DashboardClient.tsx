@@ -101,6 +101,9 @@ export default function DashboardClient({ client, initialCalls }: Props) {
 
   const toastRef  = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const threadRef = useRef<HTMLDivElement>(null);
+  const callsRef  = useRef<AithaCall[]>([]);
+
+  useEffect(() => { callsRef.current = calls; }, [calls]);
 
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
@@ -144,6 +147,14 @@ export default function DashboardClient({ client, initialCalls }: Props) {
         const addMsg = (list: AithaMessage[]) => list.some(m => m.id === msg.id) ? list : [...list, msg];
         setCalls(prev => prev.map(c => c.id !== msg.call_id ? c : { ...c, messages: addMsg(c.messages || []) }));
         setSelected(prev => !prev || prev.id !== msg.call_id ? prev : { ...prev, messages: addMsg(prev.messages || []) });
+        if (msg.direction === "inbound") {
+          const call = callsRef.current.find(c => c.id === msg.call_id);
+          if (call && (call.call_status === "resolved" || call.call_status === "closed")) {
+            playPing();
+            showToast(`💬 Reply from ${msg.from_number}`);
+            pushNotify("💬 Customer replied", `${msg.from_number}: ${msg.body ? msg.body.slice(0, 80) : ""}`);
+          }
+        }
       })
       .subscribe();
     return () => { supabase.removeChannel(ch); };
