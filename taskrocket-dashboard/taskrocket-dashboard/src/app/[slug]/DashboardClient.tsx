@@ -88,12 +88,12 @@ type Section = "new" | "active" | "ready" | "closed";
 type StatusConfig = { label: string; tagClass: string; section: Section; accentColor: string };
 
 const STATUS_MAP: Record<string, StatusConfig> = {
-  missed:           { label: "New Lead",       tagClass: styles.tagNew,    section: "new",    accentColor: "#2DD4BF" },
-  ai_texted:        { label: "AI Replied",      tagClass: styles.tagWait,   section: "active", accentColor: "#60A5FA" },
-  customer_replied: { label: "Replied",         tagClass: styles.tagActive, section: "active", accentColor: "#FF7A30" },
-  owner_replied:    { label: "You Replied",     tagClass: styles.tagWait,   section: "active", accentColor: "#60A5FA" },
-  resolved:         { label: "Ready to Call",   tagClass: styles.tagReady,  section: "ready",  accentColor: "#22C55E" },
-  closed:           { label: "Complete",        tagClass: styles.tagDone,   section: "closed", accentColor: "#6B7280" },
+  missed:           { label: "New Lead",      tagClass: styles.tagNew,    section: "new",    accentColor: "#2DD4BF" },
+  ai_texted:        { label: "AI Replied",     tagClass: styles.tagWait,   section: "active", accentColor: "#60A5FA" },
+  customer_replied: { label: "Replied",        tagClass: styles.tagActive, section: "active", accentColor: "#FF7A30" },
+  owner_replied:    { label: "You Replied",    tagClass: styles.tagWait,   section: "active", accentColor: "#60A5FA" },
+  resolved:         { label: "Ready to Call",  tagClass: styles.tagReady,  section: "ready",  accentColor: "#22C55E" },
+  closed:           { label: "Complete",       tagClass: styles.tagDone,   section: "closed", accentColor: "#6B7280" },
 };
 
 function getStatus(s: string): StatusConfig {
@@ -124,9 +124,12 @@ export default function DashboardClient({ client, initialCalls }: Props) {
   }, [selected?.messages?.length]);
 
   useEffect(() => {
-    if ("Notification" in window) {
-      setPushOn(Notification.permission === "granted");
-      if (Notification.permission === "default") setTimeout(() => setShowBanner(true), 4000);
+    if (typeof window === "undefined") return;
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "granted") {
+      setPushOn(true);
+    } else if (Notification.permission === "default") {
+      setTimeout(() => setShowBanner(true), 4000);
     }
   }, []);
 
@@ -142,7 +145,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
         if (call.urgency === "immediate") {
           playPing();
           showToast(`🔴 Urgent call from ${call.caller_number}`);
-          notify("🔴 Urgent missed call", `From ${call.caller_number}`);
+          pushNotify("🔴 Urgent missed call", `From ${call.caller_number}`);
         }
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "calls", filter: `client_id=eq.${client.id}` }, (payload) => {
@@ -152,7 +155,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
         if (u.call_status === "resolved") {
           playPing();
           showToast(`✅ Ready for callback — ${u.caller_number}`);
-          notify("Ready for callback", `${u.caller_number} is ready to schedule`);
+          pushNotify("Ready for callback", `${u.caller_number} is ready to schedule`);
         }
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `client_id=eq.${client.id}` }, (payload) => {
@@ -171,16 +174,32 @@ export default function DashboardClient({ client, initialCalls }: Props) {
     toastRef.current = setTimeout(() => setToast(null), 4000);
   }
 
-  function notify(title: string, body: string) {
-    if (Notification.permission === "granted") new Notification(title, { body, icon: "/icon-192.png" });
+  function pushNotify(title: string, body: string) {
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+      new Notification(title, { body, icon: "/icon-192.png" });
+    }
   }
 
   async function enablePush() {
-    if (!("Notification" in window)) return;
-    const r = await Notification.requestPermission();
-    setPushOn(r === "granted");
-    setShowBanner(false);
-    if (r === "granted") showToast("🔔 Notifications enabled");
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      showToast("Notifications not supported in this browser");
+      return;
+    }
+    try {
+      const r = await Notification.requestPermission();
+      if (r === "granted") {
+        setPushOn(true);
+        setShowBanner(false);
+        showToast("🔔 Notifications enabled");
+      } else if (r === "denied") {
+        setShowBanner(false);
+        showToast("Notifications blocked — enable in browser settings");
+      } else {
+        setShowBanner(false);
+      }
+    } catch {
+      showToast("Could not enable notifications");
+    }
   }
 
   async function openCall(call: AithaCall) {
@@ -242,16 +261,18 @@ export default function DashboardClient({ client, initialCalls }: Props) {
     } catch { showToast("Failed to delete"); }
   }
 
-  /* ─── SECTIONS ─────────────────────────────────────────── */
+  /* ─── COMPUTED ─────────────────────────────────────────── */
   const today = new Date().toDateString();
   const sections: Record<Section, AithaCall[]> = { new: [], active: [], ready: [], closed: [] };
   for (const c of calls) sections[getStatus(c.call_status).section].push(c);
 
+  const todayCalls = calls.filter(c => new Date(c.created_at).toDateString() === today);
   const metrics = {
-    missed: calls.filter(c => new Date(c.created_at).toDateString() === today).length,
-    active: sections.active.length,
-    ready:  sections.ready.length,
-    closed: calls.filter(c => c.call_status === "closed" && new Date(c.created_at).toDateString() === today).length,
+    missed:   todayCalls.length,
+    active:   sections.active.length,
+    ready:    sections.ready.length,
+    closed:   todayCalls.filter(c => c.call_status === "closed").length,
+    aiSaved:  calls.filter(c => ["resolved", "closed"].includes(c.call_status)).length,
   };
 
   /* ─── CARD ─────────────────────────────────────────────── */
@@ -350,7 +371,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
                   ✓ Complete
                 </button>
               )}
-              <button className={styles.btnDel} onClick={() => deleteCall(selected.id)}>🗑</button>
+              <button className={styles.btnDel} onClick={() => deleteCall(selected.id)}>🗑 Delete</button>
               <button className={styles.btnClose} onClick={() => setSelected(null)}>✕</button>
             </div>
           </div>
@@ -445,7 +466,12 @@ export default function DashboardClient({ client, initialCalls }: Props) {
         </div>
         <div className={styles.headerRight}>
           <div className={styles.liveBadge}><div className={styles.liveDot} /> Live</div>
-          <button className={styles.notifBtn} style={{ color: pushOn ? "#2DD4BF" : "#4B5A6E" }} onClick={() => !pushOn && enablePush()} title={pushOn ? "Notifications on" : "Enable notifications"}>
+          <button
+            className={styles.notifBtn}
+            style={{ color: pushOn ? "#2DD4BF" : "#4B5A6E" }}
+            onClick={enablePush}
+            title={pushOn ? "Notifications on" : "Enable notifications"}
+          >
             {pushOn ? "🔔" : "🔕"}
           </button>
         </div>
@@ -461,6 +487,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
         </div>
       )}
 
+      {/* Metrics — 5 stats */}
       <div className={styles.metrics}>
         <div className={styles.metric}>
           <div className={styles.metricVal}>{metrics.missed}</div>
@@ -470,14 +497,20 @@ export default function DashboardClient({ client, initialCalls }: Props) {
           <div className={`${styles.metricVal} ${metrics.active > 0 ? styles.metricValOrange : ""}`}>{metrics.active}</div>
           <div className={styles.metricLbl}>In Progress</div>
         </div>
-        <div className={`${styles.metric} ${metrics.ready > 0 ? styles.metricClickable : ""}`}
-          onClick={() => metrics.ready > 0 && setOpenSections(p => ({ ...p, ready: true }))}>
+        <div
+          className={`${styles.metric} ${metrics.ready > 0 ? styles.metricClickable : ""}`}
+          onClick={() => metrics.ready > 0 && setOpenSections(p => ({ ...p, ready: true }))}
+        >
           <div className={`${styles.metricVal} ${metrics.ready > 0 ? styles.metricValGreen : ""}`}>{metrics.ready}</div>
           <div className={styles.metricLbl}>Call Back Now</div>
         </div>
         <div className={styles.metric}>
           <div className={styles.metricVal}>{metrics.closed}</div>
           <div className={styles.metricLbl}>Closed Today</div>
+        </div>
+        <div className={styles.metric}>
+          <div className={`${styles.metricVal} ${metrics.aiSaved > 0 ? styles.metricValTeal : ""}`}>{metrics.aiSaved}</div>
+          <div className={styles.metricLbl}>Leads Saved</div>
         </div>
       </div>
 
