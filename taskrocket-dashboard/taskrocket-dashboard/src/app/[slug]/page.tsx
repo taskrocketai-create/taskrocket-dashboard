@@ -27,15 +27,19 @@ async function getCalls(clientId: string): Promise<AithaCall[]> {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!
   );
-
   const { data } = await supabase
     .from("calls")
     .select("*, messages(*)")
     .eq("client_id", clientId)
     .order("created_at", { ascending: false })
-    .limit(50);
-
-  return data || [];
+    .limit(100);
+  return (data || []).map((call: AithaCall) => ({
+    ...call,
+    messages: (call.messages || []).sort(
+      (a: { created_at: string }, b: { created_at: string }) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    ),
+  }));
 }
 
 export default async function ClientDashboardPage({ params }: Props) {
