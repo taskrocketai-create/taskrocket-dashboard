@@ -5,7 +5,6 @@ import { AithaClient, AithaCall, AithaMessage } from "@/lib/supabase";
 import { createClient } from "@supabase/supabase-js";
 import styles from "./dashboard.module.css";
 
-/* ─── HELPERS ─────────────────────────────────────────────── */
 function timeAgo(iso: string): string {
   const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (secs < 60) return "just now";
@@ -83,38 +82,22 @@ function extractDetails(call: AithaCall): { vehicle: string; problem: string } {
   };
 }
 
-/* ─── STATUS CONFIG ──────────────────────────────────────── */
-type Section = "new" | "active" | "ready" | "closed";
-type StatusConfig = { label: string; tagClass: string; section: Section; accentColor: string };
-
-const STATUS_MAP: Record<string, StatusConfig> = {
-  missed:           { label: "New Lead",      tagClass: styles.tagNew,    section: "new",    accentColor: "#2DD4BF" },
-  ai_texted:        { label: "AI Replied",     tagClass: styles.tagWait,   section: "active", accentColor: "#60A5FA" },
-  customer_replied: { label: "Replied",        tagClass: styles.tagActive, section: "active", accentColor: "#FF7A30" },
-  owner_replied:    { label: "You Replied",    tagClass: styles.tagWait,   section: "active", accentColor: "#60A5FA" },
-  resolved:         { label: "Ready to Call",  tagClass: styles.tagReady,  section: "ready",  accentColor: "#22C55E" },
-  closed:           { label: "Complete",       tagClass: styles.tagDone,   section: "closed", accentColor: "#6B7280" },
-};
-
-function getStatus(s: string): StatusConfig {
-  return STATUS_MAP[s] || STATUS_MAP["missed"];
+// All non-closed statuses go to "Ready for Callback"
+// Closed goes to "Closed"
+function isActive(status: string): boolean {
+  return status !== "closed";
 }
 
-/* ─── PROPS ──────────────────────────────────────────────── */
 type Props = { client: AithaClient; initialCalls: AithaCall[] };
 
-/* ─── COMPONENT ──────────────────────────────────────────── */
 export default function DashboardClient({ client, initialCalls }: Props) {
   const [calls, setCalls]       = useState<AithaCall[]>(initialCalls);
   const [selected, setSelected] = useState<AithaCall | null>(null);
   const [reply, setReply]       = useState("");
   const [sending, setSending]   = useState(false);
   const [pushOn, setPushOn]     = useState(false);
-  const [showBanner, setShowBanner] = useState(false);
   const [toast, setToast]       = useState<string | null>(null);
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    new: true, active: true, ready: true, closed: false,
-  });
+  const [closedOpen, setClosedOpen] = useState(false);
 
   const toastRef  = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -124,13 +107,8 @@ export default function DashboardClient({ client, initialCalls }: Props) {
   }, [selected?.messages?.length]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!("Notification" in window)) return;
-    if (Notification.permission === "granted") {
-      setPushOn(true);
-    } else if (Notification.permission === "default") {
-      setTimeout(() => setShowBanner(true), 4000);
-    }
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    setPushOn(Notification.permission === "granted");
   }, []);
 
   useEffect(() => {
@@ -185,20 +163,21 @@ export default function DashboardClient({ client, initialCalls }: Props) {
       showToast("Notifications not supported in this browser");
       return;
     }
-    try {
-      const r = await Notification.requestPermission();
-      if (r === "granted") {
-        setPushOn(true);
-        setShowBanner(false);
-        showToast("🔔 Notifications enabled");
-      } else if (r === "denied") {
-        setShowBanner(false);
-        showToast("Notifications blocked — enable in browser settings");
-      } else {
-        setShowBanner(false);
-      }
-    } catch {
-      showToast("Could not enable notifications");
+    if (Notification.permission === "granted") {
+      showToast("🔔 Notifications already enabled");
+      setPushOn(true);
+      return;
+    }
+    if (Notification.permission === "denied") {
+      showToast("Notifications blocked — click the lock icon in your browser address bar to allow");
+      return;
+    }
+    const r = await Notification.requestPermission();
+    if (r === "granted") {
+      setPushOn(true);
+      showToast("🔔 Notifications enabled");
+    } else {
+      showToast("Notifications not enabled");
     }
   }
 
@@ -229,9 +208,9 @@ export default function DashboardClient({ client, initialCalls }: Props) {
         from_number: client.aitha_phone, to_number: selected.caller_number,
         created_at: new Date().toISOString(),
       };
-      const addMsg = (c: AithaCall) => ({ ...c, call_status: "owner_replied", messages: [...(c.messages || []), newMsg] });
-      setCalls(prev => prev.map(c => c.id !== selected.id ? c : addMsg(c)));
-      setSelected(prev => prev ? addMsg(prev) : prev);
+      const upd = (c: AithaCall) => ({ ...c, call_status: "owner_replied", messages: [...(c.messages || []), newMsg] });
+      setCalls(prev => prev.map(c => c.id !== selected.id ? c : upd(c)));
+      setSelected(prev => prev ? upd(prev) : prev);
       setReply("");
       showToast("✓ Text sent");
     } catch { showToast("Failed to send — try again"); }
@@ -245,7 +224,8 @@ export default function DashboardClient({ client, initialCalls }: Props) {
     });
     setCalls(prev => prev.map(c => c.id !== callId ? c : { ...c, call_status: "closed" }));
     setSelected(prev => prev?.id === callId ? { ...prev, call_status: "closed" } : prev);
-    showToast("✓ Marked complete");
+    setSelected(null);
+    showToast("✓ Call complete — archived");
   }
 
   async function deleteCall(callId: string, e?: React.MouseEvent) {
@@ -263,24 +243,25 @@ export default function DashboardClient({ client, initialCalls }: Props) {
 
   /* ─── COMPUTED ─────────────────────────────────────────── */
   const today = new Date().toDateString();
-  const sections: Record<Section, AithaCall[]> = { new: [], active: [], ready: [], closed: [] };
-  for (const c of calls) sections[getStatus(c.call_status).section].push(c);
+  const active = calls.filter(c => isActive(c.call_status));
+  const closed = calls.filter(c => !isActive(c.call_status));
+  const readyCount = calls.filter(c => c.call_status === "resolved").length;
 
-  const todayCalls = calls.filter(c => new Date(c.created_at).toDateString() === today);
   const metrics = {
-    missed:   todayCalls.length,
-    active:   sections.active.length,
-    ready:    sections.ready.length,
-    closed:   todayCalls.filter(c => c.call_status === "closed").length,
-    aiSaved:  calls.filter(c => ["resolved", "closed"].includes(c.call_status)).length,
+    missed:  calls.filter(c => new Date(c.created_at).toDateString() === today).length,
+    active:  active.length,
+    ready:   readyCount,
+    closed:  closed.filter(c => new Date(c.created_at).toDateString() === today).length,
+    saved:   calls.filter(c => ["resolved", "closed"].includes(c.call_status)).length,
   };
 
   /* ─── CARD ─────────────────────────────────────────────── */
   function renderCard(call: AithaCall) {
-    const st = getStatus(call.call_status);
     const { vehicle, problem } = extractDetails(call);
     const msgs = call.messages || [];
     const lastMsg = msgs[msgs.length - 1];
+    const isClosed = !isActive(call.call_status);
+    const isReady = call.call_status === "resolved";
     const isUrgent = call.urgency === "immediate";
 
     let preview = "";
@@ -289,9 +270,13 @@ export default function DashboardClient({ client, initialCalls }: Props) {
     else if (call.voicemail_transcript) preview = trunc(call.voicemail_transcript, 80);
     else if (call.ai_response_sent) preview = trunc(call.ai_response_sent, 80);
 
+    const accentColor = isClosed ? "#6B7280" : isReady ? "#22C55E" : isUrgent ? "#EF4444" : "#60A5FA";
+    const tagLabel = isClosed ? "Complete" : isReady ? "Ready to Call" : isUrgent ? "Urgent" : "In Progress";
+    const tagClass = isClosed ? styles.tagDone : isReady ? styles.tagReady : isUrgent ? styles.tagUrgent : styles.tagWait;
+
     return (
       <div key={call.id} className={styles.card} onClick={() => openCall(call)}>
-        <div className={styles.cardAccent} style={{ background: st.accentColor }} />
+        <div className={styles.cardAccent} style={{ background: accentColor }} />
         <div className={styles.cardLeft}>
           <div className={styles.cardTop}>
             <span className={styles.callerNum}>{call.caller_number}</span>
@@ -299,7 +284,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
           </div>
           {preview && <div className={styles.cardSummary}>{preview}</div>}
           <div className={styles.cardTags}>
-            <span className={`${styles.tag} ${st.tagClass}`}>{st.label}</span>
+            <span className={`${styles.tag} ${tagClass}`}>{tagLabel}</span>
             {call.voicemail_transcript && <span className={`${styles.tag} ${styles.tagVm}`}>🎙 VM</span>}
             {isUrgent && <span className={`${styles.tag} ${styles.tagUrgent}`}>🔴 Urgent</span>}
           </div>
@@ -311,44 +296,16 @@ export default function DashboardClient({ client, initialCalls }: Props) {
     );
   }
 
-  /* ─── SECTION ──────────────────────────────────────────── */
-  function renderSection(key: Section, title: string, dotColor: string, isAlert: boolean) {
-    const items = sections[key];
-    const isOpen = openSections[key];
-    return (
-      <div className={styles.section} key={key}>
-        <div className={styles.sectionHeader} onClick={() => setOpenSections(p => ({ ...p, [key]: !p[key] }))}>
-          <div className={styles.sectionTitle}>
-            <span className={styles.sectionDot} style={{ background: dotColor }} />
-            {title}
-          </div>
-          <div className={styles.sectionRight}>
-            <span className={`${styles.sectionCount} ${isAlert && items.length > 0 ? styles.sectionCountAlert : ""}`}>
-              {items.length}
-            </span>
-            <span className={`${styles.chevron} ${isOpen ? styles.chevronOpen : ""}`}>▼</span>
-          </div>
-        </div>
-        {isOpen && (
-          <div>
-            {items.length === 0
-              ? <div className={styles.empty}>None right now</div>
-              : items.map(renderCard)
-            }
-          </div>
-        )}
-      </div>
-    );
-  }
-
   /* ─── DRAWER ───────────────────────────────────────────── */
   function renderDrawer() {
     if (!selected) return null;
-    const st = getStatus(selected.call_status);
     const { vehicle, problem } = extractDetails(selected);
     const msgs = selected.messages || [];
     const hasOutboundAI = msgs.some(m => m.direction === "outbound_ai");
-    const isClosed = selected.call_status === "closed";
+    const isClosed = !isActive(selected.call_status);
+    const isReady = selected.call_status === "resolved";
+    const tagLabel = isClosed ? "Complete" : isReady ? "Ready to Call" : "In Progress";
+    const tagClass = isClosed ? styles.tagDone : isReady ? styles.tagReady : styles.tagWait;
 
     return (
       <div className={styles.overlay} onClick={() => setSelected(null)}>
@@ -358,7 +315,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
           <div className={styles.drawerHeader}>
             <div className={styles.drawerNum}>{selected.caller_number}</div>
             <div className={styles.drawerMeta}>
-              <span className={`${styles.tag} ${st.tagClass}`}>{st.label}</span>
+              <span className={`${styles.tag} ${tagClass}`}>{tagLabel}</span>
               <span style={{ color: "#4B5A6E" }}>·</span>
               <span>{formatTime(selected.created_at)}</span>
             </div>
@@ -447,7 +404,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
               </button>
             </div>
           ) : (
-            <div className={styles.resolvedBar}>✓ Complete</div>
+            <div className={styles.resolvedBar}>✓ Call complete — archived</div>
           )}
         </div>
       </div>
@@ -470,37 +427,19 @@ export default function DashboardClient({ client, initialCalls }: Props) {
             className={styles.notifBtn}
             style={{ color: pushOn ? "#2DD4BF" : "#4B5A6E" }}
             onClick={enablePush}
-            title={pushOn ? "Notifications on" : "Enable notifications"}
+            title={pushOn ? "Notifications on" : "Click to enable notifications"}
           >
             {pushOn ? "🔔" : "🔕"}
           </button>
         </div>
       </div>
 
-      {showBanner && !pushOn && (
-        <div className={styles.pushBanner}>
-          <span>Get notified when a customer is ready for a callback</span>
-          <div className={styles.pushBannerBtns}>
-            <button className={styles.pushAllow} onClick={enablePush}>Allow</button>
-            <button className={styles.pushSkip} onClick={() => setShowBanner(false)}>Later</button>
-          </div>
-        </div>
-      )}
-
-      {/* Metrics — 5 stats */}
       <div className={styles.metrics}>
         <div className={styles.metric}>
           <div className={styles.metricVal}>{metrics.missed}</div>
           <div className={styles.metricLbl}>Missed Today</div>
         </div>
         <div className={styles.metric}>
-          <div className={`${styles.metricVal} ${metrics.active > 0 ? styles.metricValOrange : ""}`}>{metrics.active}</div>
-          <div className={styles.metricLbl}>In Progress</div>
-        </div>
-        <div
-          className={`${styles.metric} ${metrics.ready > 0 ? styles.metricClickable : ""}`}
-          onClick={() => metrics.ready > 0 && setOpenSections(p => ({ ...p, ready: true }))}
-        >
           <div className={`${styles.metricVal} ${metrics.ready > 0 ? styles.metricValGreen : ""}`}>{metrics.ready}</div>
           <div className={styles.metricLbl}>Call Back Now</div>
         </div>
@@ -509,15 +448,51 @@ export default function DashboardClient({ client, initialCalls }: Props) {
           <div className={styles.metricLbl}>Closed Today</div>
         </div>
         <div className={styles.metric}>
-          <div className={`${styles.metricVal} ${metrics.aiSaved > 0 ? styles.metricValTeal : ""}`}>{metrics.aiSaved}</div>
+          <div className={`${styles.metricVal} ${metrics.saved > 0 ? styles.metricValTeal : ""}`}>{metrics.saved}</div>
           <div className={styles.metricLbl}>Leads Saved</div>
         </div>
       </div>
 
-      {renderSection("ready",  "Ready for Callback", "#22C55E", true)}
-      {renderSection("active", "In Progress",        "#FF7A30", false)}
-      {renderSection("new",    "New Leads",          "#2DD4BF", false)}
-      {renderSection("closed", "Closed",             "#6B7280", false)}
+      {/* Ready for Callback */}
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <div className={styles.sectionTitle}>
+            <span className={styles.sectionDot} style={{ background: "#22C55E" }} />
+            Ready for Callback
+          </div>
+          <span className={`${styles.sectionCount} ${active.length > 0 ? styles.sectionCountAlert : ""}`}>
+            {active.length}
+          </span>
+        </div>
+        <div>
+          {active.length === 0
+            ? <div className={styles.empty}>No calls waiting — you&apos;re all caught up</div>
+            : active.map(renderCard)
+          }
+        </div>
+      </div>
+
+      {/* Closed / Archive */}
+      <div className={styles.section}>
+        <div className={styles.sectionHeader} onClick={() => setClosedOpen(p => !p)} style={{ cursor: "pointer" }}>
+          <div className={styles.sectionTitle}>
+            <span className={styles.sectionDot} style={{ background: "#6B7280" }} />
+            Closed
+          </div>
+          <div className={styles.sectionRight}>
+            <span className={styles.sectionCount}>{closed.length}</span>
+            <span className={`${styles.chevron} ${closedOpen ? styles.chevronOpen : ""}`}>▼</span>
+          </div>
+        </div>
+        {closedOpen && (
+          <div>
+            {closed.length === 0
+              ? <div className={styles.empty}>No closed calls yet</div>
+              : closed.map(renderCard)
+            }
+          </div>
+        )}
+      </div>
 
       <div className={styles.footer}>
         <span className={styles.footerText}>{client.aitha_phone}</span>
