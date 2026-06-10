@@ -120,10 +120,13 @@ export default function DashboardClient({ client, initialCalls }: Props) {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "calls", filter: `client_id=eq.${client.id}` }, (payload) => {
         const call = payload.new as AithaCall;
         setCalls(prev => [{ ...call, messages: [] }, ...prev]);
+        playPing();
         if (call.urgency === "immediate") {
-          playPing();
           showToast(`🔴 Urgent call from ${call.caller_number}`);
           pushNotify("🔴 Urgent missed call", `From ${call.caller_number}`);
+        } else {
+          showToast(`📞 New call from ${call.caller_number}`);
+          pushNotify("📞 New missed call", `From ${call.caller_number} — Aitha texted them back`);
         }
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "calls", filter: `client_id=eq.${client.id}` }, (payload) => {
