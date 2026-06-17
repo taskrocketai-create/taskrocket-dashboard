@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AithaClient, AithaCall, AithaMessage } from "@/lib/supabase";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, RealtimeChannel } from "@supabase/supabase-js";
 import styles from "./dashboard.module.css";
 
 function timeAgo(iso: string): string {
@@ -98,12 +98,29 @@ export default function DashboardClient({ client, initialCalls }: Props) {
   const [pushOn, setPushOn]     = useState(false);
   const [toast, setToast]       = useState<string | null>(null);
   const [closedOpen, setClosedOpen] = useState(false);
+  const [theme, setTheme]       = useState<"dark" | "light">("dark");
 
-  const toastRef  = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const threadRef = useRef<HTMLDivElement>(null);
-  const callsRef  = useRef<AithaCall[]>([]);
+  const toastRef   = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const threadRef  = useRef<HTMLDivElement>(null);
+  const callsRef   = useRef<AithaCall[]>([]);
+  const channelRef = useRef<RealtimeChannel | null>(null);
+  const keepAliveRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   useEffect(() => { callsRef.current = calls; }, [calls]);
+
+  // Persist theme preference
+  useEffect(() => {
+    const saved = localStorage.getItem("aitha-theme") as "dark" | "light" | null;
+    if (saved) setTheme(saved);
+  }, []);
+
+  function toggleTheme() {
+    setTheme(prev => {
+      const next = prev === "dark" ? "light" : "dark";
+      localStorage.setItem("aitha-theme", next);
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
@@ -119,45 +136,78 @@ export default function DashboardClient({ client, initialCalls }: Props) {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
-    const ch = supabase.channel("aitha-rt")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "calls", filter: `client_id=eq.${client.id}` }, (payload) => {
-        const call = payload.new as AithaCall;
-        setCalls(prev => [{ ...call, messages: [] }, ...prev]);
-        playPing();
-        if (call.urgency === "immediate") {
-          showToast(`🔴 Urgent call from ${call.caller_number}`);
-          pushNotify("🔴 Urgent missed call", `From ${call.caller_number}`);
-        } else {
-          showToast(`📞 New call from ${call.caller_number}`);
-          pushNotify("📞 New missed call", `From ${call.caller_number} — Aitha texted them back`);
-        }
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "calls", filter: `client_id=eq.${client.id}` }, (payload) => {
-        const u = payload.new as AithaCall;
-        setCalls(prev => prev.map(c => c.id === u.id ? { ...c, ...u } : c));
-        setSelected(prev => prev?.id === u.id ? { ...prev, ...u } : prev);
-        if (u.call_status === "resolved") {
+
+    function subscribe() {
+      // Clean up any existing channel first
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+
+      const ch = supabase.channel(`aitha-rt-${Date.now()}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "calls", filter: `client_id=eq.${client.id}` }, (payload) => {
+          const call = payload.new as AithaCall;
+          setCalls(prev => [{ ...call, messages: [] }, ...prev]);
           playPing();
-          showToast(`✅ Ready for callback — ${u.caller_number}`);
-          pushNotify("Ready for callback", `${u.caller_number} is ready to schedule`);
-        }
-      })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `client_id=eq.${client.id}` }, (payload) => {
-        const msg = payload.new as AithaMessage;
-        const addMsg = (list: AithaMessage[]) => list.some(m => m.id === msg.id) ? list : [...list, msg];
-        setCalls(prev => prev.map(c => c.id !== msg.call_id ? c : { ...c, messages: addMsg(c.messages || []) }));
-        setSelected(prev => !prev || prev.id !== msg.call_id ? prev : { ...prev, messages: addMsg(prev.messages || []) });
-        if (msg.direction === "inbound") {
-          const call = callsRef.current.find(c => c.id === msg.call_id);
-          if (call && (call.call_status === "resolved" || call.call_status === "closed")) {
-            playPing();
-            showToast(`💬 Reply from ${msg.from_number}`);
-            pushNotify("💬 Customer replied", `${msg.from_number}: ${msg.body ? msg.body.slice(0, 80) : ""}`);
+          if (call.urgency === "immediate") {
+            showToast(`🔴 Urgent call from ${call.caller_number}`);
+            pushNotify("🔴 Urgent missed call", `From ${call.caller_number}`);
+          } else {
+            showToast(`📞 New call from ${call.caller_number}`);
+            pushNotify("📞 New missed call", `From ${call.caller_number} — Aitha texted them back`);
           }
-        }
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
+        })
+        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "calls", filter: `client_id=eq.${client.id}` }, (payload) => {
+          const u = payload.new as AithaCall;
+          setCalls(prev => prev.map(c => c.id === u.id ? { ...c, ...u } : c));
+          setSelected(prev => prev?.id === u.id ? { ...prev, ...u } : prev);
+          if (u.call_status === "resolved") {
+            playPing();
+            showToast(`✅ Ready for callback — ${u.caller_number}`);
+            pushNotify("Ready for callback", `${u.caller_number} is ready to schedule`);
+          }
+        })
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `client_id=eq.${client.id}` }, (payload) => {
+          const msg = payload.new as AithaMessage;
+          const addMsg = (list: AithaMessage[]) => list.some(m => m.id === msg.id) ? list : [...list, msg];
+          setCalls(prev => prev.map(c => c.id !== msg.call_id ? c : { ...c, messages: addMsg(c.messages || []) }));
+          setSelected(prev => !prev || prev.id !== msg.call_id ? prev : { ...prev, messages: addMsg(prev.messages || []) });
+          if (msg.direction === "inbound") {
+            const call = callsRef.current.find(c => c.id === msg.call_id);
+            if (call && (call.call_status === "resolved" || call.call_status === "closed")) {
+              playPing();
+              showToast(`💬 Reply from ${msg.from_number}`);
+              pushNotify("💬 Customer replied", `${msg.from_number}: ${msg.body ? msg.body.slice(0, 80) : ""}`);
+            }
+          }
+        })
+        .subscribe((status) => {
+          // If the channel errors or closes unexpectedly, reconnect after 3 seconds
+          if (status === "CHANNEL_ERROR" || status === "CLOSED") {
+            setTimeout(subscribe, 3000);
+          }
+        });
+
+      channelRef.current = ch;
+    }
+
+    subscribe();
+
+    // Keepalive: re-subscribe every 4 minutes to prevent silent timeout drops
+    // Supabase free tier websockets can drop silently after inactivity
+    keepAliveRef.current = setInterval(subscribe, 4 * 60 * 1000);
+
+    // Reconnect when the browser tab comes back into focus after being hidden
+    function handleVisibility() {
+      if (document.visibilityState === "visible") subscribe();
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      if (channelRef.current) supabase.removeChannel(channelRef.current);
+      clearInterval(keepAliveRef.current);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [client.id]);
 
   function showToast(msg: string) {
@@ -423,7 +473,7 @@ export default function DashboardClient({ client, initialCalls }: Props) {
 
   /* ─── RENDER ───────────────────────────────────────────── */
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} ${theme === "light" ? styles.pageLight : ""}`}>
       {toast && <div className={styles.toast}>{toast}</div>}
 
       <div className={styles.header}>
@@ -445,6 +495,13 @@ export default function DashboardClient({ client, initialCalls }: Props) {
         </div>
         <div className={styles.headerRight}>
           <div className={styles.liveBadge}><div className={styles.liveDot} /> Live</div>
+          <button
+            className={styles.themeBtn}
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {theme === "dark" ? "☀️" : "🌙"}
+          </button>
           <button
             className={styles.notifBtn}
             style={{ color: pushOn ? "#2DD4BF" : "#4B5A6E", cursor: pushOn ? "default" : "pointer" }}
