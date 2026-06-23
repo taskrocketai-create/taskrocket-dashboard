@@ -4,22 +4,16 @@ import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: NextRequest) {
   const { slug, password } = await req.json();
-
-  if (!slug || !password) {
-    return NextResponse.json({ error: "Missing fields" }, { status: 400 });
-  }
+  if (!slug || !password) return NextResponse.json({ error: "Missing fields" }, { status: 400 });
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
-
-  if (!supabaseUrl || !supabaseKey) {
-    return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
-  }
+  if (!supabaseUrl || !supabaseKey) return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
 
   const supabase = createClient(supabaseUrl, supabaseKey);
   const hash = createHash("sha256").update(password).digest("hex");
 
-  // Try Aitha clients first
+  // Try Aitha clients first (public/aitha schema)
   const { data: aithaClient } = await supabase
     .from("clients")
     .select("password_hash")
@@ -27,24 +21,15 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (aithaClient?.password_hash) {
-    if (hash !== aithaClient.password_hash) {
-      return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
-    }
+    if (hash !== aithaClient.password_hash) return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
     return setAuthCookie(slug, hash);
   }
 
-  // Try PM clients
-  const { data: pmClient } = await supabase
-    .schema("pm")
-    .from("clients")
-    .select("password_hash")
-    .eq("slug", slug)
-    .single();
+  // Try PM clients via RPC (avoids schema exposure requirement)
+  const { data: pmHash } = await supabase.rpc("get_pm_client_password", { p_slug: slug });
 
-  if (pmClient?.password_hash) {
-    if (hash !== pmClient.password_hash) {
-      return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
-    }
+  if (pmHash) {
+    if (hash !== pmHash) return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
     return setAuthCookie(slug, hash);
   }
 
