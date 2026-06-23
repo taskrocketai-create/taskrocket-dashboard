@@ -141,8 +141,8 @@ export default function PMDashboardClient({ client, incidents: init, tenants, pr
     setConvLoading(true);
     fetch(`/api/pm/conversations?incidentId=${selected.id}`)
       .then(r => r.json())
-      .then(d => { setConvos(d); setConvLoading(false); })
-      .catch(() => setConvLoading(false));
+      .then(d => { setConvos(Array.isArray(d) ? d : []); setConvLoading(false); })
+      .catch(() => { setConvos([]); setConvLoading(false); });
   }, [selected?.id]);
 
   useEffect(() => {
