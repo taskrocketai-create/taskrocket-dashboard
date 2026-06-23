@@ -1,6 +1,8 @@
-import { createServerClient, type CookieMethodsServer } from "@supabase/ssr";
+import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+
+type CookieEntry = { name: string; value: string; options?: Record<string, unknown> };
 
 export async function createClient() {
   const cookieStore = await cookies();
@@ -10,10 +12,11 @@ export async function createClient() {
     {
       cookies: {
         getAll() { return cookieStore.getAll(); },
-        setAll(cookiesToSet: Parameters<CookieMethodsServer["setAll"]>[0]) {
+        setAll(cookiesToSet: CookieEntry[]) {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              cookieStore.set(name, value, options as any)
             );
           } catch { /* called from Server Component -- safe to ignore */ }
         },
