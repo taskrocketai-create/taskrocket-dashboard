@@ -36,63 +36,49 @@ async function getCalls(clientId: string): Promise<AithaCall[]> {
   }));
 }
 
-async function getPMClient(slug: string) {
-  const { data } = await sb().schema("pm").from("clients").select("*").eq("slug", slug).single();
-  return data;
-}
+async function getPMData(slug: string) {
+  const supabase = sb();
 
-async function getPMData(clientId: string) {
-  const client = sb();
-  const pm = client.schema("pm");
+  // Use RPC functions to bypass schema exposure requirement
+  const { data: client } = await supabase.rpc("pm_get_client", { p_slug: slug });
+  if (!client) return null;
+
   const [incRes, tenRes, propRes, venRes] = await Promise.all([
-    pm.from("incidents")
-      .select("*, tenant:tenants(id,name,phone,unit), property:properties(id,name,address), vendor:vendors(id,name,phone,trade)")
-      .eq("client_id", clientId)
-      .order("reported_at", { ascending: false })
-      .limit(100),
-    pm.from("tenants")
-      .select("*, property:properties(id,name)")
-      .eq("client_id", clientId)
-      .order("name"),
-    pm.from("properties")
-      .select("*")
-      .eq("client_id", clientId)
-      .order("name"),
-    pm.from("vendors")
-      .select("*")
-      .eq("client_id", clientId)
-      .order("trade")
-      .order("priority"),
+    supabase.rpc("pm_get_incidents",  { p_client_id: client.id }),
+    supabase.rpc("pm_get_tenants",    { p_client_id: client.id }),
+    supabase.rpc("pm_get_properties", { p_client_id: client.id }),
+    supabase.rpc("pm_get_vendors",    { p_client_id: client.id }),
   ]);
+
   return {
-    incidents: incRes.data || [],
-    tenants:   tenRes.data  || [],
-    properties: propRes.data || [],
-    vendors:   venRes.data  || [],
+    client,
+    incidents:   incRes.data  || [],
+    tenants:     tenRes.data   || [],
+    properties:  propRes.data  || [],
+    vendors:     venRes.data   || [],
   };
 }
 
 export default async function ClientDashboardPage({ params }: Props) {
   const { slug } = await params;
 
-  // Aitha clients first
+  // Try Aitha first
   const aithaClient = await getAithaClient(slug);
   if (aithaClient) {
     const calls = await getCalls(aithaClient.id);
     return <DashboardClient client={aithaClient} initialCalls={calls} />;
   }
 
-  // PM clients
-  const pmClient = await getPMClient(slug);
-  if (pmClient) {
-    const { incidents, tenants, properties, vendors } = await getPMData(pmClient.id);
+  // Try PM via RPC
+  const pmData = await getPMData(slug);
+  if (pmData) {
     return (
       <PMDashboardClient
-        client={pmClient}
-        incidents={incidents}
-        tenants={tenants}
-        properties={properties}
-        vendors={vendors}
+        client={pmData.client}
+        incidents={pmData.incidents}
+        tenants={pmData.tenants}
+        properties={pmData.properties}
+        vendors={pmData.vendors}
       />
     );
   }
