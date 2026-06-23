@@ -1,41 +1,45 @@
 "use client";
 
 import { useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import styles from "./login.module.css";
 
 export default function LoginForm() {
-  const params = useSearchParams();
   const router = useRouter();
-  const slug = params.get("slug") ?? "";
-  const next = params.get("next") ?? `/${slug}`;
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get("redirectTo") || null;
 
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const supabase = createClient();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
-    try {
-      const res = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug, password }),
-      });
-      if (res.ok) {
-        router.push(next);
-        router.refresh();
-      } else {
-        const data = await res.json();
-        setError(data.error ?? "Incorrect password");
-      }
-    } catch {
-      setError("Something went wrong. Please try again.");
-    } finally {
+
+    const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (authError || !data.user) {
+      setError("Invalid email or password.");
       setLoading(false);
+      return;
     }
+
+    const slug = data.user.user_metadata?.dashboard_slug as string | undefined;
+    if (!slug) {
+      setError("No dashboard found for this account. Contact support@taskrocket.org.");
+      setLoading(false);
+      return;
+    }
+
+    const destination = redirectTo && redirectTo.startsWith(`/${slug}`) ? redirectTo : `/${slug}`;
+    router.push(destination);
+    router.refresh();
   }
 
   return (
@@ -58,36 +62,36 @@ export default function LoginForm() {
           </div>
         </div>
 
-        <h1 className={styles.title}>Sign in to your dashboard</h1>
-        <p className={styles.subtitle}>
-          Enter your password to access{" "}
-          <span className={styles.slugLabel}>/{slug}</span>
-        </p>
+        <h1 className={styles.title}>Client Login</h1>
+        <p className={styles.subtitle}>Sign in to your dashboard</p>
 
-        <form className={styles.form} onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className={styles.form}>
           <input
-            className={styles.input}
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoFocus
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
             required
+            autoComplete="email"
+            className={styles.input}
+            placeholder="Email address"
           />
-          {error && <p className={styles.error}>{error}</p>}
-          <button className={styles.btn} type="submit" disabled={loading || !password}>
-            {loading ? (
-              <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span style={{ width: "14px", height: "14px", border: "2px solid rgba(13,21,32,0.3)", borderTop: "2px solid #0D1520", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
-                Please wait…
-              </span>
-            ) : "Sign in →"}
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            required
+            autoComplete="current-password"
+            className={styles.input}
+            placeholder="Password"
+          />
+          {error && <div className={styles.error}>{error}</div>}
+          <button type="submit" disabled={loading} className={styles.btn}>
+            {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
 
         <p className={styles.help}>
-          Need access? Contact{" "}
-          <a href="mailto:info@taskrocket.org">info@taskrocket.org</a>
+          <a href="/auth/reset-password">Forgot password?</a>
         </p>
       </div>
     </div>
