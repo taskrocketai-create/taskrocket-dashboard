@@ -10,13 +10,7 @@ export async function GET(req: NextRequest) {
     process.env.SUPABASE_SERVICE_KEY!
   );
 
-  const { data, error } = await supabase
-    .schema("pm")
-    .from("conversations")
-    .select("*")
-    .eq("incident_id", incidentId)
-    .order("created_at", { ascending: true });
-
+  const { data, error } = await supabase.rpc("pm_get_conversations", { p_incident_id: incidentId });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data || []);
 }
