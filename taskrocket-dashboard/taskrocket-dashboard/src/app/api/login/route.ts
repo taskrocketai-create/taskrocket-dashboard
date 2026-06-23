@@ -17,25 +17,42 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createClient(supabaseUrl, supabaseKey);
+  const hash = createHash("sha256").update(password).digest("hex");
 
-  const { data: client, error } = await supabase
+  // Try Aitha clients first
+  const { data: aithaClient } = await supabase
     .from("clients")
     .select("password_hash")
     .eq("slug", slug)
     .single();
 
-  if (error || !client?.password_hash) {
-    return NextResponse.json({ error: "Client not found", detail: error?.message }, { status: 404 });
+  if (aithaClient?.password_hash) {
+    if (hash !== aithaClient.password_hash) {
+      return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
+    }
+    return setAuthCookie(slug, hash);
   }
 
-  const hash = createHash("sha256").update(password).digest("hex");
+  // Try PM clients
+  const { data: pmClient } = await supabase
+    .schema("pm")
+    .from("clients")
+    .select("password_hash")
+    .eq("slug", slug)
+    .single();
 
-  if (hash !== client.password_hash) {
-    return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
+  if (pmClient?.password_hash) {
+    if (hash !== pmClient.password_hash) {
+      return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
+    }
+    return setAuthCookie(slug, hash);
   }
 
+  return NextResponse.json({ error: "Client not found" }, { status: 404 });
+}
+
+function setAuthCookie(slug: string, hash: string) {
   const res = NextResponse.json({ ok: true });
-
   res.cookies.set(`tr_auth_${slug}`, hash, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -43,6 +60,5 @@ export async function POST(req: NextRequest) {
     maxAge: 60 * 60 * 24 * 30,
     path: "/",
   });
-
   return res;
 }
