@@ -16,7 +16,8 @@ export default function ResetPasswordPage() {
     setError("");
     setLoading(true);
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/update-password`,
+      // Point to the callback route which will exchange the code then redirect to update-password
+      redirectTo: `${window.location.origin}/auth/callback?next=/auth/update-password`,
     });
     if (resetError) {
       setError("Something went wrong. Check the email address and try again.");
