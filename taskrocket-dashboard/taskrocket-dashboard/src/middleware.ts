@@ -51,6 +51,12 @@ export async function middleware(request: NextRequest) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.searchParams.set("redirectTo", pathname);
+    // TEMP DEBUG - remove after diagnosing login loop
+    const cookieNames = request.cookies.getAll().map((c) => c.name).join(",");
+    loginUrl.searchParams.set(
+      "debug",
+      `err=${userError?.message ?? "none"}|cookies=${cookieNames || "NONE"}`
+    );
     return NextResponse.redirect(loginUrl);
   }
 
