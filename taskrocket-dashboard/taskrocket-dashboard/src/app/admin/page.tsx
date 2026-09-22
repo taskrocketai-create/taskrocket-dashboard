@@ -31,6 +31,7 @@ type BuildRow = {
   scenarioName: string;
   status: "ok" | "warn" | "unknown";
   detail: string;
+  makeUrl: string;
 };
 
 type Attention = { title: string; detail: string };
@@ -81,7 +82,13 @@ export default async function AdminHealthMonitor() {
         detail = "Running";
       }
     }
-    return { label: m.client_label, scenarioName: m.make_scenario_name, status, detail };
+    return {
+      label: m.client_label,
+      scenarioName: m.make_scenario_name,
+      status,
+      detail,
+      makeUrl: `https://us2.make.com/2059306/scenarios/${m.make_scenario_id}/edit`,
+    };
   });
 
   const attention: Attention[] = [];
@@ -181,7 +188,9 @@ export default async function AdminHealthMonitor() {
               <div className="hero-eyebrow" style={{ color: allOk ? "var(--green)" : "var(--orange)" }}>
                 {allOk ? "● ALL SYSTEMS NOMINAL" : `● ${attention.length} ITEM${attention.length === 1 ? "" : "S"} NEED ATTENTION`}
               </div>
-              <h2 className="hero-title">TaskRocket</h2>
+              <h2 className="hero-title" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <img src="/taskrocket-logo.png" alt="TaskRocket" style={{ height: 26 }} /> is {allOk ? "healthy" : "not healthy"}
+              </h2>
               <div className="hero-sub">{clientRows.length} client{clientRows.length === 1 ? "" : "s"} · {buildsTotal} build{buildsTotal === 1 ? "" : "s"} monitored</div>
             </div>
             <div className="hero-stats">
@@ -199,7 +208,9 @@ export default async function AdminHealthMonitor() {
             {builds.map((b, i) => (
               <div className="lead" key={i}>
                 <div>
-                  <div className="lead-name">{b.scenarioName}</div>
+                  <a href={b.makeUrl} target="_blank" rel="noopener noreferrer" className="lead-name" style={{ color: "var(--text)", textDecoration: "none" }}>
+                    {b.scenarioName} <span style={{ color: "var(--muted-2)", fontWeight: 500, fontSize: 11 }}>↗</span>
+                  </a>
                   <div className="lead-sub">{b.label}</div>
                 </div>
                 <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "right" }}>{b.detail}</div>
