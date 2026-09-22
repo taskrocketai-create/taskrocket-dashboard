@@ -32,6 +32,7 @@ type BuildRow = {
   status: "ok" | "warn" | "unknown";
   detail: string;
   makeUrl: string;
+  errorInfo: { plain: string; fix: string } | null;
 };
 
 type Attention = { title: string; detail: string };
@@ -52,6 +53,74 @@ async function getMakeScenarios(token: string): Promise<MakeScenario[]> {
   return json.scenarios ?? [];
 }
 
+async function getLastError(scenarioId: string, token: string): Promise<string | null> {
+  try {
+    const listRes = await fetch(
+      `https://us2.make.com/api/v2/scenarios/${scenarioId}/logs?status=3&pg[limit]=1&pg[sortDir]=desc`,
+      { headers: { Authorization: `Token ${token}` }, cache: "no-store" }
+    );
+    if (!listRes.ok) return null;
+    const listJson = await listRes.json();
+    const execId = listJson?.scenarioLogs?.[0]?.id ?? listJson?.logs?.[0]?.id;
+    if (!execId) return null;
+
+    const detailRes = await fetch(`https://us2.make.com/api/v2/scenarios/${scenarioId}/logs/${execId}`, {
+      headers: { Authorization: `Token ${token}` },
+      cache: "no-store",
+    });
+    if (!detailRes.ok) return null;
+    const detailJson = await detailRes.json();
+    const msg =
+      detailJson?.scenarioLog?.reason ??
+      detailJson?.scenarioLog?.log?.[0]?.reason ??
+      detailJson?.log?.reason ??
+      null;
+    return msg;
+  } catch {
+    return null;
+  }
+}
+
+/** Translate a raw Make error into plain English + a suggested fix.
+ *  Rule-based on patterns we've actually hit -- swap for a live Claude call
+ *  once an Anthropic API key is stored in app_settings, for anything this
+ *  doesn't recognize. */
+function decodeError(raw: string | null): { plain: string; fix: string } {
+  if (!raw) return { plain: "No error detail available from Make.", fix: "Open the scenario and check its History tab directly." };
+  const r = raw.toLowerCase();
+  if (r.includes("missing value of required parameter") || r.includes("bundlevalidationerror")) {
+    return {
+      plain: "A step got an empty value where it needed something.",
+      fix: "Usually means an upstream step (often an AI/HTTP call) returned nothing. Add an ifempty() fallback on that field.",
+    };
+  }
+  if (r.includes("not valid json") || r.includes("source is not valid json")) {
+    return {
+      plain: "Something that was supposed to be clean JSON had extra text in it (often markdown code fences from an AI response).",
+      fix: "Strip ```json / ``` fences before parsing, e.g. with trim(replace(replace(...))).",
+    };
+  }
+  if (r.includes("connection") && (r.includes("expired") || r.includes("invalid") || r.includes("unauthoriz"))) {
+    return {
+      plain: "The connection this scenario uses (an API key or login) has expired or was revoked.",
+      fix: "Reconnect the app's connection in Make under Connections.",
+    };
+  }
+  if (r.includes("timeout") || r.includes("timed out")) {
+    return {
+      plain: "A step took too long and Make gave up waiting.",
+      fix: "Check if the service it's calling is slow or down; consider raising the module's timeout.",
+    };
+  }
+  if (r.includes("rate limit") || r.includes("429")) {
+    return {
+      plain: "Hit a rate limit on an API this scenario calls.",
+      fix: "Add a short delay before the call, or check if usage is unexpectedly high.",
+    };
+  }
+  return { plain: raw, fix: "No known fix pattern for this one yet — worth a manual look." };
+}
+
 export default async function AdminHealthMonitor() {
   const admin = createAdminClient();
 
@@ -66,30 +135,39 @@ export default async function AdminHealthMonitor() {
   const liveScenarios = makeToken ? await getMakeScenarios(makeToken) : [];
   const byId = new Map(liveScenarios.map((s) => [String(s.id), s]));
 
-  const builds: BuildRow[] = maps.map((m) => {
-    const live = byId.get(m.make_scenario_id);
-    let status: BuildRow["status"] = "unknown";
-    let detail = "Not found in Make";
-    if (live) {
-      if (live.isinvalid) {
-        status = "warn";
-        detail = "Invalid — needs fixing";
-      } else if (!live.isActive) {
-        status = "warn";
-        detail = "Turned off";
-      } else {
-        status = "ok";
-        detail = "Running";
+  const builds: BuildRow[] = await Promise.all(
+    maps.map(async (m) => {
+      const live = byId.get(m.make_scenario_id);
+      let status: BuildRow["status"] = "unknown";
+      let detail = "Not found in Make";
+      let errorInfo: { plain: string; fix: string } | null = null;
+
+      if (live) {
+        if (live.isinvalid) {
+          status = "warn";
+          detail = "Invalid — needs fixing";
+          if (makeToken) {
+            const raw = await getLastError(m.make_scenario_id, makeToken);
+            errorInfo = decodeError(raw);
+          }
+        } else if (!live.isActive) {
+          status = "warn";
+          detail = "Turned off";
+        } else {
+          status = "ok";
+          detail = "Running";
+        }
       }
-    }
-    return {
-      label: m.client_label,
-      scenarioName: m.make_scenario_name,
-      status,
-      detail,
-      makeUrl: `https://us2.make.com/2059306/scenarios/${m.make_scenario_id}/edit`,
-    };
-  });
+      return {
+        label: m.client_label,
+        scenarioName: m.make_scenario_name,
+        status,
+        detail,
+        makeUrl: `https://us2.make.com/2059306/scenarios/${m.make_scenario_id}/edit`,
+        errorInfo,
+      };
+    })
+  );
 
   const attention: Attention[] = [];
   for (const c of clientRows) {
@@ -102,7 +180,14 @@ export default async function AdminHealthMonitor() {
   }
   for (const b of builds) {
     if (b.status === "warn") {
-      attention.push({ title: `${b.scenarioName} — ${b.detail.toLowerCase()}`, detail: `Serves ${b.label}` });
+      if (b.errorInfo) {
+        attention.push({
+          title: `${b.scenarioName} — ${b.errorInfo.plain}`,
+          detail: `Fix: ${b.errorInfo.fix}`,
+        });
+      } else {
+        attention.push({ title: `${b.scenarioName} — ${b.detail.toLowerCase()}`, detail: `Serves ${b.label}` });
+      }
     }
   }
 
@@ -178,9 +263,14 @@ export default async function AdminHealthMonitor() {
               <div className="div"></div>
               <h1>HEALTH MONITOR</h1>
             </div>
-            <a href="/admin/notifications" style={{ fontSize: 12, color: "var(--muted)", fontFamily: "'IBM Plex Mono',monospace", textDecoration: "none" }}>
-              🔔 Alerts
-            </a>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 18 }}>
+              <a href="/admin/onboard" style={{ fontSize: 12, color: "var(--muted)", fontFamily: "'IBM Plex Mono',monospace", textDecoration: "none" }}>
+                + Onboard client
+              </a>
+              <a href="/admin/notifications" style={{ fontSize: 12, color: "var(--muted)", fontFamily: "'IBM Plex Mono',monospace", textDecoration: "none" }}>
+                🔔 Alerts
+              </a>
+            </div>
           </header>
 
           <div className="hero">
