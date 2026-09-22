@@ -1,12 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import styles from "./login.module.css";
 
 export default function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") || null;
 
@@ -38,8 +37,11 @@ export default function LoginForm() {
     }
 
     const destination = redirectTo && redirectTo.startsWith(`/${slug}`) ? redirectTo : `/${slug}`;
-    router.push(destination);
-    router.refresh();
+    // Full page load (not router.push) so the auth cookie set by signInWithPassword
+    // is guaranteed to be present before the middleware checks it server-side.
+    // A soft client-side navigation can race ahead of the cookie write and bounce
+    // straight back to /login.
+    window.location.href = destination;
   }
 
   return (
